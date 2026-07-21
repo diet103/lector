@@ -1,0 +1,20 @@
+# Gradle
+.gradle/
+build/
+app/build/
+
+# Local machine config — never commit
+local.properties
+dev.properties
+
+# Signing — never commit
+*.keystore
+*.jks
+
+# IDE
+.idea/
+*.iml
+.kotlin/
+
+# OS noise
+.DS_Store
