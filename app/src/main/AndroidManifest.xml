@@ -32,9 +32,11 @@
             <intent-filter>
                 <action android:name="android.intent.action.PROCESS_TEXT" />
                 <category android:name="android.intent.category.DEFAULT" />
-                <!-- text/* not text/plain: editable rich-text fields (email/notes compose) fire
-                     PROCESS_TEXT as text/html, which a text/plain-only filter misses. Verified
-                     on-device against ChatGPT's filter, which uses text/* and does appear there. -->
+                <!-- text/* is the correct broad declaration (matches text/html rich-text
+                     selections; the extractor flattens any CharSequence). Note: this alone does
+                     NOT make the action appear in Gmail/Keep editable compose fields — those
+                     exclude it app-side (see CLAUDE.md gotchas / risk #6); the P4 screenshot path
+                     is the universal fallback there. -->
                 <data android:mimeType="text/*" />
             </intent-filter>
             <intent-filter>
