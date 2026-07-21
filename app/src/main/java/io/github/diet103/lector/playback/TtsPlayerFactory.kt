@@ -1,6 +1,8 @@
 package io.github.diet103.lector.playback
 
+import android.annotation.SuppressLint
 import android.content.Context
+import androidx.media3.common.util.Clock
 import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.datasource.cache.Cache
 import androidx.media3.datasource.cache.CacheDataSource
@@ -19,16 +21,24 @@ import okhttp3.OkHttpClient
  *         └─ CacheDataSource(SimpleCache)           write-through, key = content hash
  *             └─ GuardedUpstreamDataSource          refuses offset re-requests
  *                 └─ OkHttpDataSource               executes the POST, streams MP3
+ *
+ * [baseUrl] and [clock] exist for the Robolectric billing suite: tests point the chain at a
+ * MockWebServer and drive playback on an auto-advancing [FakeClock][androidx.media3.test.utils];
+ * production call sites take the defaults. (`setClock` is marked visible-for-testing upstream,
+ * hence the suppression.)
  */
 object TtsPlayerFactory {
 
     private const val FAST_START_BUFFER_MS = 500
 
+    @SuppressLint("VisibleForTests")
     fun create(
         context: Context,
         registry: SpeakRequestRegistry,
         cache: Cache,
         okHttpClient: OkHttpClient,
+        baseUrl: String = TtsDataSpecResolver.DEFAULT_BASE_URL,
+        clock: Clock = Clock.DEFAULT,
         apiKeyProvider: () -> String
     ): ExoPlayer {
         val network = OkHttpDataSource.Factory(okHttpClient)
@@ -38,7 +48,7 @@ object TtsPlayerFactory {
             .setUpstreamDataSourceFactory(guarded)
         val resolving = ResolvingDataSource.Factory(
             cached,
-            TtsDataSpecResolver(registry, apiKeyProvider)
+            TtsDataSpecResolver(registry, apiKeyProvider, baseUrl)
         )
 
         val mediaSourceFactory = ProgressiveMediaSource.Factory(resolving)
@@ -53,9 +63,19 @@ object TtsPlayerFactory {
             )
             .build()
 
-        return ExoPlayer.Builder(context)
+        val builder = ExoPlayer.Builder(context)
             .setMediaSourceFactory(mediaSourceFactory)
             .setLoadControl(loadControl)
-            .build()
+            .setClock(clock)
+        if (clock !== Clock.DEFAULT) {
+            // The stuck-playback watchdogs are calibrated to wall-clock time. An injected clock
+            // (the test suite's auto-advancing FakeClock) leaps through fake time while real
+            // network I/O stalls, so the thresholds fire spuriously — park them out of reach.
+            builder.setStuckBufferingDetectionTimeoutMs(Int.MAX_VALUE)
+                .setStuckPlayingDetectionTimeoutMs(Int.MAX_VALUE)
+                .setStuckPlayingNotEndingTimeoutMs(Int.MAX_VALUE)
+                .setStuckSuppressedDetectionTimeoutMs(Int.MAX_VALUE)
+        }
+        return builder.build()
     }
 }

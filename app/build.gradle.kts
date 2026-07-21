@@ -50,11 +50,19 @@ android {
         compose = true
         buildConfig = true
     }
-}
 
-kotlin {
-    compilerOptions {
-        optIn.add("androidx.media3.common.util.UnstableApi")
+    testOptions {
+        unitTests {
+            isIncludeAndroidResources = true
+            all { it.maxHeapSize = "2g" }
+        }
+    }
+
+    lint {
+        // Media3's UnstableApi is accepted project-wide. Its marker is the androidx flavor of
+        // @RequiresOptIn, which kotlinc's optIn flag cannot register — this lint switch is the
+        // only real enforcement point, so disabling it here IS the project-wide opt-in.
+        disable += "UnsafeOptInUsageError"
     }
 }
 
@@ -71,4 +79,10 @@ dependencies {
     implementation(libs.okhttp)
     debugImplementation(libs.androidx.compose.ui.tooling)
     testImplementation(libs.junit)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.androidx.test.ext.junit)
+    testImplementation(libs.androidx.media3.test.utils)
+    testImplementation(libs.androidx.media3.test.utils.robolectric)
+    testImplementation(libs.mockwebserver)
+    testImplementation(libs.turbine)
 }

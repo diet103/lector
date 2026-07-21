@@ -19,7 +19,8 @@ import java.io.IOException
  */
 class TtsDataSpecResolver(
     private val registry: SpeakRequestRegistry,
-    private val apiKeyProvider: () -> String
+    private val apiKeyProvider: () -> String,
+    private val baseUrl: String = DEFAULT_BASE_URL
 ) : ResolvingDataSource.Resolver {
 
     override fun resolveDataSpec(dataSpec: DataSpec): DataSpec {
@@ -34,7 +35,7 @@ class TtsDataSpecResolver(
             .toString()
             .toByteArray(Charsets.UTF_8)
 
-        val url = "https://api.elevenlabs.io/v1/text-to-speech/${request.voiceId}/stream" +
+        val url = "$baseUrl/v1/text-to-speech/${request.voiceId}/stream" +
             "?output_format=${request.outputFormat}"
 
         return dataSpec.buildUpon()
@@ -51,5 +52,9 @@ class TtsDataSpecResolver(
             .setKey(key)
             .setFlags(dataSpec.flags and DataSpec.FLAG_DONT_CACHE_IF_LENGTH_UNKNOWN.inv())
             .build()
+    }
+
+    companion object {
+        const val DEFAULT_BASE_URL = "https://api.elevenlabs.io"
     }
 }
