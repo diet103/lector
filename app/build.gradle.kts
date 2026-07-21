@@ -1,6 +1,14 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
+}
+
+// Local-only developer secrets (git-ignored); absent in CI, so fields default to empty
+val devProps = Properties().apply {
+    val file = rootProject.file("dev.properties")
+    if (file.exists()) file.inputStream().use { load(it) }
 }
 
 android {
@@ -13,9 +21,16 @@ android {
         targetSdk = 36
         versionCode = 1
         versionName = "0.0.1-dev"
+
+        buildConfigField("String", "DEV_ELEVEN_KEY", "\"\"")
+        buildConfigField("String", "DEV_VOICE_ID", "\"\"")
     }
 
     buildTypes {
+        debug {
+            buildConfigField("String", "DEV_ELEVEN_KEY", "\"${devProps.getProperty("ELEVENLABS_API_KEY", "")}\"")
+            buildConfigField("String", "DEV_VOICE_ID", "\"${devProps.getProperty("DEV_VOICE_ID", "")}\"")
+        }
         release {
             isMinifyEnabled = true
             isShrinkResources = true
@@ -33,6 +48,13 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
+    }
+}
+
+kotlin {
+    compilerOptions {
+        optIn.add("androidx.media3.common.util.UnstableApi")
     }
 }
 
@@ -44,6 +66,9 @@ dependencies {
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.ui.tooling.preview)
+    implementation(libs.androidx.media3.exoplayer)
+    implementation(libs.androidx.media3.datasource.okhttp)
+    implementation(libs.okhttp)
     debugImplementation(libs.androidx.compose.ui.tooling)
     testImplementation(libs.junit)
 }

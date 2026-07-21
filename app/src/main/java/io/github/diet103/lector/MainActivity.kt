@@ -4,16 +4,11 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import io.github.diet103.lector.ui.dev.DevSpeakScreen
 import io.github.diet103.lector.ui.theme.LectorTheme
 
 class MainActivity : ComponentActivity() {
@@ -23,25 +18,9 @@ class MainActivity : ComponentActivity() {
         setContent {
             LectorTheme {
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    Home(Modifier.padding(innerPadding))
+                    DevSpeakScreen(Modifier.padding(innerPadding))
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun Home(modifier: Modifier = Modifier) {
-    Column(
-        modifier = modifier.fillMaxSize(),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Text(text = "Lector", style = MaterialTheme.typography.displayMedium)
-        Text(
-            text = "reads your screen aloud",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
     }
 }
