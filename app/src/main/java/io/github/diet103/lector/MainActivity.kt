@@ -1,48 +1,56 @@
 package io.github.diet103.lector
 
-import android.Manifest
-import android.content.pm.PackageManager
-import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
-import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.core.content.ContextCompat
-import io.github.diet103.lector.ui.dev.DevSpeakScreen
+import io.github.diet103.lector.ui.home.HomeScreen
+import io.github.diet103.lector.ui.onboarding.OnboardingScreen
 import io.github.diet103.lector.ui.theme.LectorTheme
 
+/**
+ * Onboarding until there's a usable key and voice, then Home. The notification permission is
+ * asked for inside onboarding with a rationale (PLAN §6 P5), replacing P2's bare prompt-on-launch.
+ */
 class MainActivity : ComponentActivity() {
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        val container = (application as LectorApplication).container
+
         setContent {
             LectorTheme {
-                // P2 dev convenience so the media notification is actually visible; P5 replaces
-                // this with a proper onboarding request that carries a rationale.
-                RequestNotificationPermissionOnce()
+                var setUp by remember { mutableStateOf(container.isSetUp) }
+
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    DevSpeakScreen(Modifier.padding(innerPadding))
+                    if (setUp) {
+                        HomeScreen(
+                            container = container,
+                            onChangeKey = {
+                                container.apiKeyStore.clear()
+                                container.lastError.clear()
+                                setUp = false
+                            },
+                            modifier = Modifier.padding(innerPadding)
+                        )
+                    } else {
+                        OnboardingScreen(
+                            container = container,
+                            onFinished = { setUp = true },
+                            modifier = Modifier.padding(innerPadding)
+                        )
+                    }
                 }
             }
         }
-    }
-}
-
-@androidx.compose.runtime.Composable
-private fun RequestNotificationPermissionOnce() {
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
-    val context = androidx.compose.ui.platform.LocalContext.current
-    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
-    LaunchedEffect(Unit) {
-        val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
-            PackageManager.PERMISSION_GRANTED
-        if (!granted) launcher.launch(Manifest.permission.POST_NOTIFICATIONS)
     }
 }

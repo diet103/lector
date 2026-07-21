@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Android 11 and below. The encrypted key is Keystore-bound and useless off this device, so
+    restoring it elsewhere could only produce a confusing undecryptable blob (PLAN §4, privacy).
+-->
+<full-backup-content>
+    <exclude domain="sharedpref" path="lector_credentials.xml" />
+</full-backup-content>

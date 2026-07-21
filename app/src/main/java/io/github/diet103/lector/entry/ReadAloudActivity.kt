@@ -2,6 +2,7 @@ package io.github.diet103.lector.entry
 
 import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
@@ -15,6 +16,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -23,6 +25,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -43,9 +46,12 @@ import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.MoreExecutors
 import io.github.diet103.lector.BuildConfig
 import io.github.diet103.lector.LectorApplication
+import io.github.diet103.lector.MainActivity
 import io.github.diet103.lector.app.AppContainer
 import io.github.diet103.lector.model.SpeakRequest
+import io.github.diet103.lector.model.TtsError
 import io.github.diet103.lector.ocr.TextBlockAssembler
+import io.github.diet103.lector.playback.PlaybackErrorMapper
 import io.github.diet103.lector.playback.PlaybackService
 import io.github.diet103.lector.ui.theme.LectorTheme
 import kotlinx.coroutines.CancellationException
@@ -93,10 +99,8 @@ class ReadAloudActivity : ComponentActivity() {
      * that can't speak the result anyway.
      */
     private fun initialStage(image: Uri?, container: AppContainer): Stage {
-        val hasKey = container.apiKeyProvider().isNotBlank()
-
         if (image != null) {
-            return if (hasKey) Stage.Reading else Stage.Failed(NO_KEY)
+            return if (container.isSetUp) Stage.Reading else notSetUp(container, null)
         }
 
         return when (val extraction = IntentTextExtractor.extract(intent)) {
@@ -108,9 +112,15 @@ class ReadAloudActivity : ComponentActivity() {
             )
 
             is TextExtraction.Extracted ->
-                if (hasKey) Stage.Speak(extraction.text, extraction.truncated)
-                else Stage.Failed(NO_KEY)
+                if (container.isSetUp) Stage.Speak(extraction.text, extraction.truncated)
+                else notSetUp(container, extraction.text)
         }
+    }
+
+    /** Holds the selection across the setup detour so the user doesn't have to find it again. */
+    private fun notSetUp(container: AppContainer, pending: String?): Stage {
+        container.pendingText = pending
+        return Stage.Failed(TtsError.NoApiKey.message, offerSetup = true)
     }
 }
 
@@ -124,7 +134,7 @@ private sealed interface Stage {
     data class Speak(val text: String, val truncated: Boolean) : Stage
 
     /** Terminal; the scrim becomes tap-to-dismiss. */
-    data class Failed(val message: String) : Stage
+    data class Failed(val message: String, val offerSetup: Boolean = false) : Stage
 }
 
 @Composable
@@ -180,15 +190,28 @@ private fun ReadAloudScrim(
             tonalElevation = 3.dp,
             shape = MaterialTheme.shapes.large
         ) {
-            Row(
+            Column(
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                if (busy) {
-                    CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    if (busy) {
+                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                    }
+                    Text(message, style = MaterialTheme.typography.bodyMedium)
                 }
-                Text(message, style = MaterialTheme.typography.bodyMedium)
+                if (current is Stage.Failed && current.offerSetup) {
+                    TextButton(onClick = {
+                        context.startActivity(
+                            Intent(context, MainActivity::class.java)
+                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        )
+                        onFinished()
+                    }) { Text("Set up Lector") }
+                }
             }
         }
     }
@@ -228,7 +251,11 @@ private fun SpeakHandoff(
 
             override fun onPlayerError(error: PlaybackException) {
                 handler.removeCallbacks(giveUp)
-                onError("Couldn't play that: ${error.cause?.message ?: error.message}.")
+                // Recorded as well as shown: the scrim is about to be dismissed, and Home is
+                // where the user will look for what went wrong.
+                val mapped = PlaybackErrorMapper.map(error)
+                container.lastError.record(mapped)
+                onError(mapped.message)
             }
         }
         future.addListener({
@@ -240,7 +267,7 @@ private fun SpeakHandoff(
             controller = connected
             connected.addListener(listener)
             val uri = container.registry.register(
-                SpeakRequest(text = speak.text, voiceId = container.defaultVoiceId)
+                SpeakRequest(text = speak.text, voiceId = container.currentVoiceId.orEmpty())
             )
             connected.setMediaItem(MediaItem.Builder().setMediaId(uri.lastPathSegment!!).build())
             connected.prepare()

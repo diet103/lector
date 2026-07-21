@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Android 12+. Excluded from both cloud backup and direct device-to-device transfer: the key is
+    Keystore-bound, so a copy on another device can never be decrypted anyway (PLAN §4, privacy).
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="lector_credentials.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="lector_credentials.xml" />
+    </device-transfer>
+</data-extraction-rules>

@@ -39,6 +39,13 @@ class PlaybackService : MediaSessionService() {
             apiKeyProvider = container.apiKeyProvider
         )
         player.addListener(IdleStopListener())
+        // The scrim that started this read is usually gone by the time a stream fails, and the
+        // notification can't explain itself — so the ledger is the only place the reason survives.
+        player.addListener(object : Player.Listener {
+            override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                container.lastError.record(PlaybackErrorMapper.map(error))
+            }
+        })
 
         val sessionActivity = PendingIntent.getActivity(
             this,

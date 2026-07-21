@@ -23,13 +23,11 @@ android {
         versionName = "0.0.1-dev"
 
         buildConfigField("String", "DEV_ELEVEN_KEY", "\"\"")
-        buildConfigField("String", "DEV_VOICE_ID", "\"\"")
     }
 
     buildTypes {
         debug {
             buildConfigField("String", "DEV_ELEVEN_KEY", "\"${devProps.getProperty("ELEVENLABS_API_KEY", "")}\"")
-            buildConfigField("String", "DEV_VOICE_ID", "\"${devProps.getProperty("DEV_VOICE_ID", "")}\"")
         }
         release {
             isMinifyEnabled = true
