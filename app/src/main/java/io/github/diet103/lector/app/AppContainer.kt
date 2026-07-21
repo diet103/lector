@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.media3.datasource.cache.Cache
 import io.github.diet103.lector.BuildConfig
 import io.github.diet103.lector.data.SpeakRequestRegistry
+import io.github.diet103.lector.ocr.ScreenTextRecognizer
 import io.github.diet103.lector.playback.TtsCache
 import okhttp3.OkHttpClient
 import java.util.concurrent.atomic.AtomicInteger
@@ -49,4 +50,10 @@ class AppContainer(context: Context) {
         .build()
 
     val cache: Cache get() = TtsCache.get(appContext)
+
+    /**
+     * Lazy so the bundled ML Kit model is only loaded in a process that actually gets a
+     * screenshot shared to it — the text paths never pay for it.
+     */
+    val screenTextRecognizer: ScreenTextRecognizer by lazy { ScreenTextRecognizer() }
 }

@@ -7,6 +7,8 @@ lifecycleRuntimeCompose = "2.11.0"
 composeBom = "2026.06.01"
 media3 = "1.10.0"
 okhttp = "4.12.0"
+coroutines = "1.11.0"
+mlkitTextRecognition = "16.0.1"
 junit = "4.13.2"
 robolectric = "4.16.1"
 androidxTestExtJunit = "1.3.0"
@@ -25,6 +27,10 @@ androidx-media3-exoplayer = { group = "androidx.media3", name = "media3-exoplaye
 androidx-media3-session = { group = "androidx.media3", name = "media3-session", version.ref = "media3" }
 androidx-media3-datasource-okhttp = { group = "androidx.media3", name = "media3-datasource-okhttp", version.ref = "media3" }
 okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
+kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
+# Bundled Latin model: on-device, no network, no permission (PLAN §11). The unbundled
+# play-services variant is the smaller alternative we deliberately did not take.
+mlkit-text-recognition = { group = "com.google.mlkit", name = "text-recognition", version.ref = "mlkitTextRecognition" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 robolectric = { group = "org.robolectric", name = "robolectric", version.ref = "robolectric" }
 androidx-test-ext-junit = { group = "androidx.test.ext", name = "junit", version.ref = "androidxTestExtJunit" }
