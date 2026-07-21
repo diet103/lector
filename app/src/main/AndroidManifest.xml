@@ -23,6 +23,24 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".entry.ReadAloudActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:label="@string/read_aloud_label"
+            android:theme="@style/Theme.Lector.Transparent">
+            <intent-filter>
+                <action android:name="android.intent.action.PROCESS_TEXT" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+        </activity>
+
         <service
             android:name=".playback.PlaybackService"
             android:exported="true"

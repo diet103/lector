@@ -27,6 +27,9 @@ class AppContainer(context: Context) {
 
     val apiKeyProvider: () -> String = { apiKey }
 
+    /** The dev voice until P6's picker lands; ReadAloudActivity speaks with it. */
+    val defaultVoiceId: String = BuildConfig.DEV_VOICE_ID
+
     /**
      * Counts real upstream requests so the dev screen can still show the billing invariant on
      * the live service (the automated suite is the real fence). Debug builds only — the
