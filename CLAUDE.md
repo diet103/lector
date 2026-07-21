@@ -29,6 +29,7 @@ Select-to-speak Android app streaming ElevenLabs TTS (bring-your-own key). **[PL
 - Robolectric playback tests need an auto-advancing `FakeClock`, and `TtsPlayerFactory` parks Media3's stuck-playback watchdogs whenever a non-default clock is injected — fake time races ahead of real MockWebServer I/O and fires them spuriously otherwise.
 - kotlinx.serialization's compiler plugin under built-in Kotlin is unproven — decided in P5; the resolver uses platform `org.json` today and that's fine.
 - ElevenLabs API keys can be **scope-restricted** (401 `missing_permissions`) and free-tier accounts **cannot use library voices** via API (402 `paid_plan_required`) — both observed live; error map + onboarding copy must handle them (PLAN §3).
+- **PROCESS_TEXT filter must be `text/*`, not `text/plain`** — editable rich-text fields (email/notes compose) fire the "Read aloud" intent as `text/html`, which a `text/plain`-only filter silently misses, so the action vanishes in exactly those apps while working in read-only views. Diagnosed on-device 2026-07-21 by diffing against ChatGPT's filter (`text/*`, appears in edit fields) — confirmed via `cmd package query-activities -t text/html`. The extractor already flattens any CharSequence, so broadening is free.
 
 ## Conventions
 

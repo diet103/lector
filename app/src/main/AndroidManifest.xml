@@ -32,7 +32,10 @@
             <intent-filter>
                 <action android:name="android.intent.action.PROCESS_TEXT" />
                 <category android:name="android.intent.category.DEFAULT" />
-                <data android:mimeType="text/plain" />
+                <!-- text/* not text/plain: editable rich-text fields (email/notes compose) fire
+                     PROCESS_TEXT as text/html, which a text/plain-only filter misses. Verified
+                     on-device against ChatGPT's filter, which uses text/* and does appear there. -->
+                <data android:mimeType="text/*" />
             </intent-filter>
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
