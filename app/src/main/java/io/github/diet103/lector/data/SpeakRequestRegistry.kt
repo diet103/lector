@@ -16,10 +16,13 @@ class SpeakRequestRegistry {
     fun register(request: SpeakRequest): Uri {
         val key = CacheKeys.forRequest(request)
         requests[key] = request
-        return Uri.parse("$SCHEME://tts/$key")
+        return uriForKey(key)
     }
 
     fun byKey(key: String): SpeakRequest? = requests[key]
+
+    /** The player-facing URI for a key; its last path segment is what the resolver reads back. */
+    fun uriForKey(key: String): Uri = Uri.parse("$SCHEME://tts/$key")
 
     companion object {
         const val SCHEME = "lector"

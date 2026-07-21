@@ -2,6 +2,8 @@ package io.github.diet103.lector.playback
 
 import android.annotation.SuppressLint
 import android.content.Context
+import androidx.media3.common.AudioAttributes
+import androidx.media3.common.C
 import androidx.media3.common.util.Clock
 import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.datasource.cache.Cache
@@ -63,10 +65,21 @@ object TtsPlayerFactory {
             )
             .build()
 
+        val audioAttributes = AudioAttributes.Builder()
+            .setUsage(C.USAGE_MEDIA)
+            .setContentType(C.AUDIO_CONTENT_TYPE_SPEECH)
+            .build()
+
         val builder = ExoPlayer.Builder(context)
             .setMediaSourceFactory(mediaSourceFactory)
             .setLoadControl(loadControl)
             .setClock(clock)
+            // handleAudioFocus=true: pause on calls, duck for nav prompts. Becoming-noisy pauses
+            // on headphone unplug. Wake mode keeps CPU + network alive with the screen off — the
+            // whole point is finishing a read after you pocket the phone (WAKE_LOCK approved §2).
+            .setAudioAttributes(audioAttributes, /* handleAudioFocus = */ true)
+            .setHandleAudioBecomingNoisy(true)
+            .setWakeMode(C.WAKE_MODE_NETWORK)
         if (clock !== Clock.DEFAULT) {
             // The stuck-playback watchdogs are calibrated to wall-clock time. An injected clock
             // (the test suite's auto-advancing FakeClock) leaps through fake time while real
