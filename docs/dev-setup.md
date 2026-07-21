@@ -24,6 +24,7 @@ Builds run with the Gradle CLI **inside WSL2**; the app deploys to a physical Pi
     ```
 
 Notes:
+- **This machine**: `adb start-server` hangs on its fork-into-daemon step. Run the server in the foreground instead — `adb -L tcp:5037 server nodaemon &` — then all adb client commands work normally.
 - mDNS auto-discovery does not cross the WSL2 NAT — always use the explicit `IP:port` from the phone screen.
 - The connection port changes every time wireless debugging toggles; re-run `adb connect` with the new port.
 - If WSL→phone TCP fails entirely: run adb on Windows instead and bridge WSL to it with
