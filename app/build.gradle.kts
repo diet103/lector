@@ -89,6 +89,11 @@ android {
                 "proguard-rules.pro"
             )
             signingConfig = signingConfigs.getByName("release").takeIf { it.storeFile != null }
+            // Diagnostic switch, never used for an actual release. An R8-only failure can't be
+            // reproduced on a debug build by definition, and can't be driven from adb either --
+            // run-as needs a debuggable package. `-PdebuggableRelease=true` gives the minified
+            // build just enough to be pushed test files and driven, without changing R8's output.
+            isDebuggable = (project.findProperty("debuggableRelease") as String?).toBoolean()
         }
     }
 

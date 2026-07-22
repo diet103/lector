@@ -56,12 +56,46 @@ for the above, then deliberately reintroduced the bug — and the test still pas
 test you haven't seen fail is decoration. We kept it, relabelled honestly as a smoke test, and
 wrote down that this class of bug is device-only.
 
+**Your unit tests run unminified, so they cannot see the bug that ships.** Our whole OCR feature was
+dead in the release build while 108 green tests said otherwise. A minified build is a different
+program; if you ship one, something has to exercise it.
+
 **Some invariants deserve a permanent fence.** Lector bills per character, so "one network POST
 per unique text, no matter how much you pause, resume or replay" is enforced by a Robolectric +
 MockWebServer suite that asserts the request count. That's the test that lets you refactor
 playback without fear.
 
 ---
+
+**`-keep class Foo` does not keep `Foo`'s constructor.** ML Kit finds its pipeline through Firebase's
+component registry: registrar class names sit in the merged manifest and are instantiated
+reflectively. ML Kit ships `-keep class * implements ComponentRegistrar`, which preserves the class
+and nothing else — no static caller means R8 drops the no-arg constructor as unused. Discovery then
+fails with `NoSuchMethodException: ...Registrar.<init> []`, **ML Kit logs it at WARN and continues
+with an empty registry**, and the first thing you actually see is a `NullPointerException` inside
+`TextRecognition.getClient()`. The fix is one rule:
+
+```proguard
+-keep class * implements com.google.firebase.components.ComponentRegistrar { <init>(); }
+```
+
+Two general lessons. Any framework that instantiates by name needs its constructors kept, not just
+its classes — check `{ <init>(); }` wherever reflection is involved. And **verify the right thing**:
+we confirmed the registrar class names survived R8, concluded discovery was fine, and were wrong,
+because keeping a name says nothing about keeping members.
+
+**Reproduce R8 bugs without your users.** An R8-only failure cannot be reproduced on a debug build
+by definition, and `adb` cannot drive a release build either, because `run-as` requires a debuggable
+package. A build flag that makes the *minified* build debuggable — R8 output unchanged, `run-as`
+available — turns "ask the user to try again" into a loop you can run yourself. That plus
+`mapping.txt` is the whole toolkit: the mapping turns `yg2.<init>` back into
+`ScreenTextRecognizer.<init>`, and the stack trace stops being noise.
+
+**A swallowed exception costs more than it saves.** Ours was `catch (e: Exception) { null }`, and the
+only logging was behind `BuildConfig.DEBUG` — which is off in exactly the build where this bug
+existed. The app told the user "Couldn't read that image" and told us nothing at all. Log the
+exception type unconditionally; a class name and message leak nothing about what the user was
+reading.
 
 ## 3. Media3
 

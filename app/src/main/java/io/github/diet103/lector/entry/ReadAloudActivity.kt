@@ -350,21 +350,39 @@ private fun SpeakHandoff(
  * main thread; ML Kit does its own threading and the wrapper just suspends.
  */
 private suspend fun readScreen(context: Context, uri: Uri, container: AppContainer): Stage {
-    val bitmap = withContext(Dispatchers.IO) {
-        runCatching { SharedImageLoader.load(context, uri) }.getOrNull()
-    } ?: return Stage.Failed("Couldn't open that image.")
+    val loaded = withContext(Dispatchers.IO) {
+        runCatching { SharedImageLoader.load(context, uri) }
+    }
+    val bitmap = loaded.getOrNull() ?: run {
+        // Unconditional, unlike the shape logging below. On a release build this is the only trace
+        // a bug report can carry, and a URI scheme plus an exception type say nothing about what
+        // the user was reading.
+        Log.w(OCR_TAG, "could not open ${uri.scheme} image", loaded.exceptionOrNull())
+        return Stage.Failed("Couldn't open that image.")
+    }
 
     val height = bitmap.height
+    var failure: Throwable? = null
     val blocks = try {
         withTimeoutOrNull(OCR_TIMEOUT_MS) { container.screenTextRecognizer.recognize(bitmap) }
     } catch (cancellation: CancellationException) {
         throw cancellation
-    } catch (failure: Exception) {
+    } catch (thrown: Exception) {
+        failure = thrown
         null
     }
 
     // Only once ML Kit has handed the bitmap back — recycling one it is still reading crashes it.
-    if (blocks == null) return Stage.Failed("Couldn't read that image.")
+    if (blocks == null) {
+        val shape = "${bitmap.width}x$height ${bitmap.config}"
+        return if (failure == null) {
+            Log.w(OCR_TAG, "OCR timed out after $OCR_TIMEOUT_MS ms on $shape")
+            Stage.Failed("That image took too long to read.")
+        } else {
+            Log.w(OCR_TAG, "OCR failed on $shape", failure)
+            Stage.Failed("Couldn't read that image.")
+        }
+    }
     bitmap.recycle()
 
     val text = TextBlockAssembler.assemble(blocks, height)
