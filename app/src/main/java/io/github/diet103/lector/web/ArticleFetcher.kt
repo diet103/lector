@@ -1,5 +1,6 @@
 package io.github.diet103.lector.web
 
+import android.util.Log
 import io.github.diet103.lector.model.TtsError
 import io.github.diet103.lector.tts.ApiResult
 import kotlinx.coroutines.Dispatchers
@@ -52,10 +53,19 @@ class ArticleFetcher(client: OkHttpClient) {
                     }
 
                     val article = ArticleExtractor.extract(html, url)
-                        ?: return@withContext ApiResult.Failed(TtsError.LinkNotReadable)
+                    if (article == null) {
+                        // Shapes only — how much HTML came back, never what it said.
+                        Log.i(TAG, "no readable article in ${html.length} chars of html")
+                        return@withContext ApiResult.Failed(TtsError.LinkNotReadable)
+                    }
                     ApiResult.Ok(article)
                 }
             } catch (failure: Exception) {
+                // Unconditional, and deliberately so. R8 silently removing a keep-rule-dependent
+                // constructor took out the whole OCR path while a catch like this reported it as an
+                // ordinary "couldn't read that" — an exception type here is the difference between
+                // a diagnosable bug report and a shrug.
+                Log.w(TAG, "fetch failed", failure)
                 ApiResult.Failed(
                     io.github.diet103.lector.tts.ElevenLabsErrorMapper.mapFailure(failure)
                 )
@@ -64,6 +74,7 @@ class ArticleFetcher(client: OkHttpClient) {
     }
 
     private companion object {
+        const val TAG = "LectorLink"
         const val MAX_BYTES = 3L * 1024 * 1024
 
         /** Sites serve very different HTML to unknown agents; a normal mobile browser gets prose. */
