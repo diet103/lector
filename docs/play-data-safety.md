@@ -23,13 +23,19 @@ reasoning rather than just the answer:
 - If a reviewer disagrees, the fallback is to declare **"App activity → other user-generated
   content"** as *collected, not shared*, required for app functionality, not used for tracking. Be
   ready to switch; it is a weaker but still honest answer.
+- **The reading history (v0.2) does not change this answer.** Play's definition turns on data
+  leaving the device; the history never does. It is stored in Lector's private storage, excluded
+  from cloud backup and device transfer, holds recognized text only (never a screenshot image), can
+  be switched off, and is cleared on sign-out. On-device-only storage is explicitly outside the
+  collection definition — but expect it to be *asked about*, so the answer to have ready is the one
+  above rather than one improvised at review time.
 
 ## Security practices
 
 | Question | Answer |
 | --- | --- |
 | Is data encrypted in transit? | Yes — all requests are HTTPS |
-| Can users request data deletion? | Yes — "Sign out" deletes the stored key and every setting; uninstalling removes everything |
+| Can users request data deletion? | Yes — "Clear history" and "Clear cached audio" in Settings; "Sign out" deletes the stored key, every setting and the whole history; uninstalling removes everything |
 | Committed to the Play Families Policy? | Not applicable — not directed at children |
 | Independent security review? | No |
 

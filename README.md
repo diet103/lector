@@ -121,15 +121,28 @@ excluded from cloud backup and device-to-device transfer.
 The screenshot path is the universal fallback: it works in any app, including ones that block text
 selection. **The image never leaves your device** — text recognition is a bundled offline library.
 
+## History
+
+Everything Lector reads is kept in a searchable list, so you can find something again and hear it
+again. Open one and you get the text laid out to follow along with: the sentence being spoken is
+tinted, and **tapping any word starts reading from there** — free, because it's playing audio that's
+already on your phone rather than asking for it again.
+
+Stored on your device only, never backed up, switchable off, and cleared in one tap. **Screenshots
+are never saved** — only the text read out of them. Full detail in [PRIVACY.md](PRIVACY.md).
+
 ## What it costs
 
 ElevenLabs bills per character, and Lector is careful with your money:
 
-- **Every read is cached.** Replaying something you've already heard is free, forever.
+- **Every read is cached.** Replaying something you've already heard is free, forever, and the
+  history says so on each entry — "free to replay" or roughly what a fresh read would cost.
 - **Playback speed is deliberately not part of the cache key**, so dragging the speed slider never
   re-synthesises anything.
-- **No seek bar.** Scrubbing a streamed response would re-request the audio and bill you twice, so
-  the seek controls are removed from the session rather than left there to cost you money.
+- **No seek bar while streaming.** Scrubbing a response as it arrives would re-request the audio and
+  bill you twice, so the seek controls are removed from the session rather than left there to cost
+  you money. Once a read is fully downloaded it's served from disk, and *then* the reader lets you
+  tap into it — the same reason replays are free.
 - **A length cap**, cut at a sentence boundary, so a runaway page can't drain your balance. Lector
   always tells you when it trimmed something.
 - **Known-unreadable links cost nothing.** A Reddit link is refused before a single character is

@@ -1,6 +1,6 @@
 # Privacy Policy — Lector
 
-**Last updated: 21 July 2026** · Applies to Lector for Android, version 0.1.0 onwards.
+**Last updated: 22 July 2026** · Applies to Lector for Android, version 0.1.0 onwards.
 
 Lector is a free, open-source app with no servers of its own. The developer of Lector collects
 nothing, receives nothing, and cannot see anything you do in the app. Everything below is verifiable
@@ -11,7 +11,10 @@ in the [source code](https://github.com/diet103/lector).
 - Lector has **no accounts, no analytics, no ads, no crash reporting, and no tracking of any kind.**
 - The only thing that ever leaves your phone is **the text you explicitly asked Lector to read**,
   sent directly to ElevenLabs using your own API key.
-- **Screenshots never leave your phone.** They are read on the device itself.
+- **Screenshots never leave your phone.** They are read on the device itself, and the image is never
+  saved — not even to your reading history.
+- From version 0.2, Lector **keeps a history of what it has read**, stored only on your phone,
+  excluded from backup, and switchable off. See [Reading history](#reading-history).
 - Your ElevenLabs API key is stored **encrypted on your device** and is never sent anywhere except
   to ElevenLabs, as the credential for your own requests.
 
@@ -49,9 +52,30 @@ in a browser. It is only made for links you deliberately share to Lector.
   the app's private cache directory. Clearing it is one tap in Settings, and uninstalling the app
   removes it.
 - **Your settings** (voice, model, speed, length limit).
+- **Your reading history** — see below.
 
-**Lector does not keep a record of what you have read.** The text you select is used to make the
-request and to compute a cache key, and is not written to any history or log.
+## Reading history
+
+**This changed in version 0.2.** Versions up to 0.1.0 kept no record of what you had read. From 0.2,
+Lector saves the text of each thing it reads so you can find it, search it, and hear it again — and
+so it can tell you honestly whether replaying something is free or would spend characters. Lector
+shows a one-time notice explaining this the first time you open it after updating.
+
+What that means in practice:
+
+- The history is stored in a database in Lector's own private storage, readable only by Lector.
+- It is **excluded from Android's cloud backup and from device-to-device transfer**, exactly like
+  your API key. It stays on the phone it was made on and does not travel to a new device.
+- **Screenshots are never saved.** For an image you share, Lector stores only the text it recognised
+  — not the picture, and not a reference to it.
+- It holds the most recent 500 reads; older ones are dropped automatically.
+- You can turn it off entirely in Settings, and clear it in one tap. It is also cleared when you
+  sign out.
+- Nothing in the history is ever transmitted anywhere. It exists only so the app can show it back
+  to you.
+
+If you would rather Lector kept no record at all, turn the switch off — either from the notice when
+it first appears or in Settings — and it will stop saving anything.
 
 ## Permissions
 
