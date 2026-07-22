@@ -32,7 +32,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.C
@@ -54,14 +53,16 @@ import kotlinx.coroutines.withContext
  * One stored read, shown as text you can follow and tap into (v0.2).
  *
  * Two things are happening at once:
- *  - **Follow along.** The sentence being spoken is tinted and the current word emphasised. Timings
- *    are estimated from the audio duration ([EstimatedReadingClock]) rather than measured, so the
+ *  - **Follow along.** The sentence being spoken is tinted and the current word marked. Timings are
+ *    estimated from the audio duration ([EstimatedReadingClock]) rather than measured, so the
  *    sentence tint is doing real work: it absorbs the drift that would make a bare word highlight
- *    jitter.
- *  - **Tap to start there.** Only for a read whose audio is entirely cached. Seeking a read that is
- *    still streaming would re-request it from byte zero and bill the whole text again, so the tap
- *    is simply not offered — and the playback service withholds the seek command as well, rather
- *    than trusting this screen to behave.
+ *    jitter. Highlighting only ever changes *colour*, never weight or spacing — anything that
+ *    alters glyph advances re-flows the line ten times a second, and the text visibly crawls.
+ *  - **Tap to start there.** Free only once a read's audio is entirely on disk; seeking one that is
+ *    still arriving would re-request it from byte zero and bill the whole text again. So a tap made
+ *    too early is *held* and applied the moment the audio is complete, rather than being dropped —
+ *    which is what made it look like tapping always restarted from the top. The playback service
+ *    withholds the seek command in the same conditions, rather than trusting this screen to behave.
  */
 @Composable
 fun ReaderScreen(
@@ -71,6 +72,7 @@ fun ReaderScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val currentVoiceId by container.settings.voiceId.collectAsState()
 
     var controller by remember { mutableStateOf<MediaController?>(null) }
     var isPlaying by remember { mutableStateOf(false) }
@@ -79,9 +81,12 @@ fun ReaderScreen(
     var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
     var caretOffset by remember { mutableIntStateOf(0) }
 
-    // True whenever every byte is on disk — asked of the cache, so it holds for a read that was
-    // never listened through to the end.
-    val seekable = remember(entry.key) { container.isFullyCached(entry) }
+    // Whether every byte is on disk, and therefore whether jumping around is free.
+    //
+    // Re-checked as playback proceeds rather than sampled once when the screen opens: a read that
+    // is still downloading becomes seekable partway through, and a value captured at open would
+    // stay false forever — which looked exactly like "tapping only ever goes back to the start".
+    var seekable by remember(entry.key) { mutableStateOf(container.isFullyCached(entry)) }
 
     // The player is the authority on duration and knows it as soon as it prepares. The stored
     // value is only a starting point, so opening a read for the first time still highlights.
@@ -127,6 +132,7 @@ fun ReaderScreen(
         do {
             if (isCurrent) {
                 positionMs = active.currentPosition
+                if (!seekable) seekable = container.isFullyCached(entry)
                 val reported = active.duration
                 if (reported != C.TIME_UNSET && reported > 0 && reported != durationMs) {
                     durationMs = reported
@@ -135,8 +141,10 @@ fun ReaderScreen(
                         container.history.markDuration(entry.key, reported)
                     }
                 }
+                // A tap that arrived before the audio was ready to be jumped around in. Held, not
+                // dropped, so it lands as soon as it legitimately can.
                 pendingSeekOffset?.let { offset ->
-                    if (durationMs > 0) {
+                    if (durationMs > 0 && seekable) {
                         active.seekTo(EstimatedReadingClock(entry.text, durationMs).positionFor(offset))
                         pendingSeekOffset = null
                     }
@@ -155,16 +163,30 @@ fun ReaderScreen(
     val sentence = remember(caretOffset, entry.key) { TextSpans.sentenceAt(entry.text, caretOffset) }
     val word = remember(caretOffset, entry.key) { TextSpans.wordAt(entry.text, caretOffset) }
 
-    val tint = MaterialTheme.colorScheme.primaryContainer
+    // Every background is paired with its own `on` colour. Setting a background alone left the
+    // text at `onSurface`, and with dynamic colour the container tone comes from the wallpaper —
+    // so light-on-light was not a bad guess but a guarantee waiting to happen.
+    val sentenceBackground = MaterialTheme.colorScheme.primaryContainer
+    val sentenceForeground = MaterialTheme.colorScheme.onPrimaryContainer
+    val wordBackground = MaterialTheme.colorScheme.primary
+    val wordForeground = MaterialTheme.colorScheme.onPrimary
+
     val highlighted = remember(sentence, word, isCurrent, durationMs) {
         AnnotatedString.Builder(entry.text).apply {
             if (isCurrent && durationMs > 0) {
                 if (!sentence.isEmpty()) {
-                    addStyle(SpanStyle(background = tint), sentence.first, sentence.last + 1)
+                    addStyle(
+                        SpanStyle(background = sentenceBackground, color = sentenceForeground),
+                        sentence.first,
+                        sentence.last + 1
+                    )
                 }
                 if (!word.isEmpty()) {
+                    // Colour only — never weight, size or letter spacing. Those change glyph
+                    // advances, so the line re-flows ten times a second as the word moves: text
+                    // visibly wriggles and gaps blink open between words.
                     addStyle(
-                        SpanStyle(fontWeight = FontWeight.Bold),
+                        SpanStyle(background = wordBackground, color = wordForeground),
                         word.first,
                         word.last + 1
                     )
@@ -182,14 +204,15 @@ fun ReaderScreen(
             active.prepare()
             isCurrent = true
         }
-        if (!seekable) {
-            active.play()
-            return
-        }
-        if (durationMs > 0) {
+        // Asked live rather than trusting the flag: a read can finish downloading between the
+        // screen opening and the tap.
+        if (!seekable) seekable = container.isFullyCached(entry)
+
+        if (seekable && durationMs > 0) {
             active.seekTo(clock.positionFor(charOffset))
         } else {
-            // Just prepared: the duration arrives a beat later, and the polling loop applies this.
+            // Either the duration hasn't arrived yet or the audio is still coming down. Hold the
+            // tap and let the polling loop land it, instead of silently starting from the top.
             pendingSeekOffset = charOffset
         }
         active.play()
@@ -219,11 +242,25 @@ fun ReaderScreen(
                 text = if (seekable) {
                     "Tap any word to start reading from there."
                 } else {
-                    "Replaying this will read it again from the start."
+                    "Still downloading — tap a word and it will jump there once it's ready."
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+
+            // Audio is synthesised once, in whatever voice was set at the time, and the cache is
+            // keyed on that. Replaying in a newly-chosen voice would be a fresh synthesis and a
+            // fresh charge — so a past read keeps its original voice, and says so rather than
+            // looking like the voice setting is broken.
+            if (currentVoiceId != null && entry.voiceId != currentVoiceId) {
+                Text(
+                    "Recorded in the voice you had set at the time. Playing it again keeps that " +
+                        "voice and stays free — reading it in your current voice would cost " +
+                        "characters, so Lector doesn't do it behind your back.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(
