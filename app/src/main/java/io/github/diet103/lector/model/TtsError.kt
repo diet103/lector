@@ -66,6 +66,16 @@ sealed interface TtsError {
         override val message = "No connection, so nothing could be fetched."
     }
 
+    /** Reddit and friends serve anonymous fetches a login wall, so there's nothing to extract. */
+    data object LinkWalledOff : TtsError {
+        override val message =
+            "This site doesn't let apps read its pages. Screenshot it and share that instead."
+    }
+
+    data object LinkNotReadable : TtsError {
+        override val message = "Couldn't find readable text on that page."
+    }
+
     data class ServerProblem(val code: Int) : TtsError {
         override val message = "ElevenLabs is having trouble right now (error $code). Try again shortly."
     }

@@ -37,6 +37,15 @@ class SettingsRepository(private val prefs: SharedPreferences) {
     )
     val maxChars: StateFlow<Int> = _maxChars.asStateFlow()
 
+    /**
+     * Offer to delete a shared screenshot once it's been read. Off by default: deleting someone's
+     * photos is not a thing to opt them into. Android shows its own confirmation regardless.
+     */
+    private val _deleteScreenshotAfterReading =
+        MutableStateFlow(prefs.getBoolean(KEY_DELETE_SCREENSHOT, false))
+    val deleteScreenshotAfterReading: StateFlow<Boolean> =
+        _deleteScreenshotAfterReading.asStateFlow()
+
     fun setVoiceId(voiceId: String) {
         prefs.edit().putString(KEY_VOICE_ID, voiceId).apply()
         _voiceId.value = voiceId
@@ -66,6 +75,11 @@ class SettingsRepository(private val prefs: SharedPreferences) {
         _maxChars.value = bounded
     }
 
+    fun setDeleteScreenshotAfterReading(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_DELETE_SCREENSHOT, enabled).apply()
+        _deleteScreenshotAfterReading.value = enabled
+    }
+
     fun clear() {
         prefs.edit().clear().apply()
         _voiceId.value = null
@@ -73,6 +87,7 @@ class SettingsRepository(private val prefs: SharedPreferences) {
         _format.value = TtsFormat.DEFAULT
         _speed.value = DEFAULT_SPEED
         _maxChars.value = DEFAULT_MAX_CHARS
+        _deleteScreenshotAfterReading.value = false
     }
 
     private fun clampCap(requested: Int, model: TtsModel): Int =
@@ -93,5 +108,6 @@ class SettingsRepository(private val prefs: SharedPreferences) {
         private const val KEY_FORMAT_ID = "format_id"
         private const val KEY_SPEED = "speed"
         private const val KEY_MAX_CHARS = "max_chars"
+        private const val KEY_DELETE_SCREENSHOT = "delete_screenshot_after_reading"
     }
 }

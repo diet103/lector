@@ -12,6 +12,7 @@ import io.github.diet103.lector.model.SpeakRequest
 import io.github.diet103.lector.ocr.ScreenTextRecognizer
 import io.github.diet103.lector.playback.TtsCache
 import io.github.diet103.lector.tts.ElevenLabsApi
+import io.github.diet103.lector.web.ArticleFetcher
 import okhttp3.OkHttpClient
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -91,6 +92,9 @@ class AppContainer(context: Context) {
         .build()
 
     val elevenLabsApi = ElevenLabsApi(okHttpClient)
+
+    /** Turns a shared link into readable prose so Lector doesn't spell a URL out loud. */
+    val articleFetcher = ArticleFetcher(okHttpClient)
 
     val cache: Cache get() = TtsCache.get(appContext)
 

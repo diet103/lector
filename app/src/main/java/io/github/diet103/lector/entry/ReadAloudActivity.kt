@@ -3,14 +3,20 @@ package io.github.diet103.lector.entry
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.IntentSender
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.provider.MediaStore
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.IntentSenderRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -53,6 +59,8 @@ import io.github.diet103.lector.model.TtsError
 import io.github.diet103.lector.ocr.TextBlockAssembler
 import io.github.diet103.lector.playback.PlaybackErrorMapper
 import io.github.diet103.lector.playback.PlaybackService
+import io.github.diet103.lector.tts.ApiResult
+import io.github.diet103.lector.web.SharedLink
 import io.github.diet103.lector.ui.theme.LectorTheme
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -60,17 +68,18 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
 /**
- * Translucent entry point for all three ways text reaches Lector (PLAN §6 P3–P4): a "Read aloud"
- * selection, a `text/plain` share, and a shared screenshot that gets OCR'd on-device first.
+ * Translucent entry point for every way text reaches Lector (PLAN §6 P3–P4 + link reading): a
+ * "Read aloud" selection, a `text/plain` share, a shared link whose page gets fetched, and a
+ * shared screenshot that gets OCR'd on-device first.
  *
  * **Contract — never sets an activity result.** For an editable PROCESS_TEXT caller (Gmail
  * compose, Keep) a returned result *replaces the user's selection*: silent data corruption
  * (risk #4). This activity only ever reads. Do not add `setResult(...)` anywhere.
  *
- * A thin scrim stays up for the whole handoff — including the OCR pass — and finishes itself the
- * instant the service reports playback: the keep-alive that dodges the FGS-promotion race (§4).
- * No `android:screenOrientation` in the manifest: a translucent activity that fixes orientation
- * crashes on Android 8.
+ * A thin scrim stays up for the whole handoff — including the OCR or fetch pass — and finishes
+ * itself the instant the service reports playback: the keep-alive that dodges the FGS-promotion
+ * race (§4). No `android:screenOrientation` in the manifest: a translucent activity that fixes
+ * orientation crashes on Android 8.
  */
 class ReadAloudActivity : ComponentActivity() {
 
@@ -78,13 +87,24 @@ class ReadAloudActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         val container = (application as LectorApplication).container
         val image = SharedImageLoader.imageUri(intent)
+        val start = initialStage(image, container)
+
+        // Whatever slow work this particular share needs before there's anything to speak.
+        val work: (suspend () -> Stage)? = when {
+            start !is Stage.Busy -> null
+            image != null -> {
+                { readScreen(this, image, container) }
+            }
+            else -> start.link?.let { link -> { readLink(link, container) } }
+        }
 
         setContent {
             // Without the app theme the scrim renders in Compose's default *light* scheme — a
             // white card over whatever dark app you were reading. Lector is dark-first.
             LectorTheme {
                 ReadAloudScrim(
-                    initial = initialStage(image, container),
+                    initial = start,
+                    work = work,
                     image = image,
                     container = container,
                     onFinished = { finish() }
@@ -94,13 +114,13 @@ class ReadAloudActivity : ComponentActivity() {
     }
 
     /**
-     * Text arrives already extracted; an image can't, so it starts in [Stage.Reading]. The key
-     * check comes first on the image path only — no point spending an OCR pass on an install
-     * that can't speak the result anyway.
+     * Text arrives already extracted; an image or a link can't, so those start [Stage.Busy]. The
+     * key check comes first on those paths — no point spending an OCR pass or a page fetch on an
+     * install that can't speak the result anyway.
      */
     private fun initialStage(image: Uri?, container: AppContainer): Stage {
         if (image != null) {
-            return if (container.isSetUp) Stage.Reading else notSetUp(container, null)
+            return if (container.isSetUp) Stage.Busy("Reading your screen…") else notSetUp(container, null)
         }
 
         return when (val extraction = IntentTextExtractor.extract(intent, container.maxChars)) {
@@ -111,9 +131,17 @@ class ReadAloudActivity : ComponentActivity() {
                 }
             )
 
-            is TextExtraction.Extracted ->
-                if (container.isSetUp) Stage.Speak(extraction.text, extraction.truncated)
-                else notSetUp(container, extraction.text)
+            is TextExtraction.Extracted -> {
+                if (!container.isSetUp) return notSetUp(container, extraction.text)
+
+                // A bare shared link is a request to read the *page*, not to spell out a URL.
+                val link = SharedLink.detect(extraction.text)
+                if (link != null) {
+                    Stage.Busy("Fetching the page…", link = link)
+                } else {
+                    Stage.Speak(extraction.text, extraction.truncated)
+                }
+            }
         }
     }
 
@@ -127,8 +155,8 @@ class ReadAloudActivity : ComponentActivity() {
 /** What the scrim is doing right now. */
 private sealed interface Stage {
 
-    /** On-device OCR is running over a shared screenshot. */
-    data object Reading : Stage
+    /** Slow work is running — on-device OCR, or fetching a shared page. */
+    data class Busy(val message: String, val link: String? = null) : Stage
 
     /** Text in hand — hand it to the playback service. */
     data class Speak(val text: String, val truncated: Boolean) : Stage
@@ -137,9 +165,32 @@ private sealed interface Stage {
     data class Failed(val message: String, val offerSetup: Boolean = false) : Stage
 }
 
+/** Fetches a shared link and turns the page into something worth listening to. */
+private suspend fun readLink(url: String, container: AppContainer): Stage {
+    val result = withTimeoutOrNull(FETCH_TIMEOUT_MS) { container.articleFetcher.fetch(url) }
+        ?: return Stage.Failed(TtsError.LinkNotReadable.message)
+
+    return when (result) {
+        is ApiResult.Failed -> Stage.Failed(result.error.message)
+        is ApiResult.Ok -> {
+            val article = result.value
+            // Lead with the headline: hearing the title first is how you know it fetched the
+            // thing you meant.
+            val body = listOfNotNull(article.title, article.text).joinToString("\n")
+            // Shapes only, never content — enough to debug extraction without logging what you read.
+            if (BuildConfig.DEBUG) {
+                Log.d(OCR_TAG, "link: extracted=${article.text.length} chars titled=${article.title != null}")
+            }
+            val capped = SentenceCap.apply(body, container.maxChars)
+            Stage.Speak(capped.text, capped.truncated)
+        }
+    }
+}
+
 @Composable
 private fun ReadAloudScrim(
     initial: Stage,
+    work: (suspend () -> Stage)?,
     image: Uri?,
     container: AppContainer,
     onFinished: () -> Unit
@@ -148,22 +199,35 @@ private fun ReadAloudScrim(
     var stage by remember { mutableStateOf(initial) }
     val current = stage
 
-    if (image != null && current is Stage.Reading) {
-        LaunchedEffect(image) { stage = readScreen(context, image, container) }
+    if (work != null && current is Stage.Busy) {
+        LaunchedEffect(work) { stage = work() }
     }
+
+    // Whatever the user chooses in Android's delete dialog, the read has already started and the
+    // scrim's job is done.
+    val deleteLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult()
+    ) { onFinished() }
 
     if (current is Stage.Speak) {
         SpeakHandoff(
             speak = current,
             container = container,
-            onPlaying = onFinished,
+            onPlaying = {
+                val request = screenshotDeleteRequest(context, image, container)
+                if (request == null) {
+                    onFinished()
+                } else {
+                    deleteLauncher.launch(IntentSenderRequest.Builder(request).build())
+                }
+            },
             onError = { stage = Stage.Failed(it) }
         )
     }
 
     val busy = current !is Stage.Failed
     val message = when (current) {
-        Stage.Reading -> "Reading your screen…"
+        is Stage.Busy -> current.message
         is Stage.Speak -> "Starting…"
         is Stage.Failed -> "${current.message} Tap to dismiss."
     }
@@ -314,6 +378,29 @@ private suspend fun readScreen(context: Context, uri: Uri, container: AppContain
     return Stage.Speak(capped.text, capped.truncated)
 }
 
+/**
+ * The "delete the screenshot once it's been read" request, or `null` when it doesn't apply.
+ *
+ * Android hands a shared image over read-only, so deletion has to go through the system, which
+ * always shows its own confirmation — that dialog can't be suppressed without the
+ * manage-all-files permission, which this app will never ask for. Only MediaStore images can be
+ * deleted this way; a file from some other provider simply isn't ours to remove.
+ */
+private fun screenshotDeleteRequest(
+    context: Context,
+    image: Uri?,
+    container: AppContainer
+): IntentSender? {
+    if (image == null || !container.settings.deleteScreenshotAfterReading.value) return null
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return null
+    if (image.authority != MediaStore.AUTHORITY) return null
+
+    return runCatching {
+        MediaStore.createDeleteRequest(context.contentResolver, listOf(image)).intentSender
+    }.getOrNull()
+}
+
+private const val FETCH_TIMEOUT_MS = 20000L
 private const val OCR_TAG = "LectorOcr"
 private const val NO_KEY = "No API key set yet. Open Lector to finish setup."
 private const val HANDOFF_TIMEOUT_MS = 8000L

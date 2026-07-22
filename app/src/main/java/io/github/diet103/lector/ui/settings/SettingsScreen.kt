@@ -1,5 +1,6 @@
 package io.github.diet103.lector.ui.settings
 
+import android.os.Build
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -17,6 +18,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -60,6 +62,7 @@ fun SettingsScreen(
     val format by settings.format.collectAsState()
     val speed by settings.speed.collectAsState()
     val maxChars by settings.maxChars.collectAsState()
+    val deleteScreenshots by settings.deleteScreenshotAfterReading.collectAsState()
 
     var confirmSignOut by remember { mutableStateOf(false) }
     var cacheNotice by remember { mutableStateOf<String?>(null) }
@@ -134,6 +137,29 @@ fun SettingsScreen(
                 valueRange = SettingsRepository.MIN_MAX_CHARS.toFloat()..model.maxChars.toFloat(),
                 modifier = Modifier.fillMaxWidth()
             )
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                SectionTitle("Screenshots")
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Delete after reading", style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            "Offer to remove the screenshot from your gallery once Lector has " +
+                                "read it. Android asks you to confirm each time — it won't let " +
+                                "any app delete your photos silently.",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                    Switch(
+                        checked = deleteScreenshots,
+                        onCheckedChange = { settings.setDeleteScreenshotAfterReading(it) }
+                    )
+                }
+            }
 
             SectionTitle("Storage")
             Text(
