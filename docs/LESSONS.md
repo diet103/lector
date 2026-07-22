@@ -112,6 +112,14 @@ by criteria we never identified. Have a fallback path rather than assuming manif
 `MediaStore.createDeleteRequest`, whose confirmation dialog is mandatory. The only way around it is
 the manage-all-files permission, which is not worth it for a convenience feature.
 
+**A foreground-service notification is exempt from `POST_NOTIFICATIONS`.** We read `granted=false`
+off `dumpsys package`, concluded the user had been running without media controls, and shipped a
+Home-screen card telling them so — while they were in fact using those controls daily. Android
+posts the FGS notification regardless, because you are entitled to know a service is running;
+`dumpsys notification` showed our `MediaStyle` record live with `FOREGROUND_SERVICE` set and the
+app op at `ignore`. **A permission bit is not a behaviour.** Check what the system actually did
+before writing UI that asserts what the user is experiencing.
+
 ---
 
 ## 5. Secrets on device
@@ -172,7 +180,14 @@ wildly different per-request caps. One request replaced a wrong assumption.
 **Log shapes, never content.** `blocks=7 assembled=145 chars` is enough to debug an OCR pipeline
 and tells you nothing about what the user was reading. Gate it on `BuildConfig.DEBUG` anyway.
 
-**A screencap captures whatever they had open.** Launch your own app first and crop.
+**A screencap captures whatever they had open.** Launch your own app first and crop — and check the
+crop actually happened. Ours silently fell back to the full frame when the image library was
+missing, which put a stranger's Reddit feed straight into the log.
+
+**Never drive input on a phone someone is holding.** `input tap` goes to whatever is in front, not
+to your app. The user picked their phone up mid-matrix, so a tap aimed at our Speak button landed
+in another app entirely. Confirm the device is free before automating taps, and treat "the app was
+in the foreground ten seconds ago" as no guarantee at all.
 
 ---
 

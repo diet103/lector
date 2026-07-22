@@ -246,8 +246,9 @@ private fun ReadyStep(account: UserAccount?, voiceName: String?, onDone: () -> U
     if (needsNotifications && !notificationsHandled) {
         Spacer(Modifier.size(8.dp))
         Text(
-            "Lector shows a notification while it's reading so you can pause it without coming " +
-                "back to the app. Without it, playback still works but you lose those controls.",
+            "Optional. The play/pause notification appears while Lector is reading either way — " +
+                "Android always shows it, because a foreground service can't hide. Allowing " +
+                "notifications lets it reach the lock screen and behave like any other media app.",
             style = MaterialTheme.typography.bodyMedium
         )
         OutlinedButton(

@@ -8,10 +8,15 @@ local.properties
 dev.properties
 
 # Signing — never commit. keystore.properties holds the store/key passwords in plain text, so it is
-# every bit as sensitive as the keystore itself.
+# every bit as sensitive as the keystore itself, and so is any archive made to back the two up.
+# A keystore.zip sitting here nearly got committed on 2026-07-22; match the whole family, not just
+# the two filenames we happened to think of.
 *.keystore
 *.jks
-keystore.properties
+*.p12
+*.bks
+keystore*
+lector-release*
 
 # IDE
 .idea/
