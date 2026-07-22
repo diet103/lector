@@ -314,6 +314,114 @@ class TtsStreamingBillingTest {
         assertEquals(C.LENGTH_UNSET.toLong(), length)
     }
 
+    // ⑫ The library behaviour the whole reader is designed around, pinned. A TTS response arrives
+    // chunked with no length, so Media3 builds a ConstantBitrateSeekMap it marks NOT seekable
+    // (`dataSize != -1 || allowSeeksIfLengthUnknown`, and DefaultExtractorsFactory sets no MP3
+    // flags). ProgressiveMediaPeriod.seekToUs then opens with
+    // `positionUs = seekMap.isSeekable() ? positionUs : 0` — so every seek silently lands at the
+    // start. That is exactly what the user reported as "it just goes back to the beginning", and
+    // it is why SeekDecision has a REPREPARE branch instead of trusting the cache alone.
+    //
+    // If a Media3 upgrade ever changes this, that branch becomes dead weight and this test says so.
+    @Test
+    fun `a read prepared while streaming cannot seek, and a seek lands at the start`() {
+        server.enqueue(mp3Response())
+
+        speak(request)
+        TestPlayerRunHelper.runUntilPlaybackState(player, Player.STATE_READY)
+
+        assertFalse(
+            "a stream with no declared length must not report itself seekable",
+            player.isCurrentMediaItemSeekable
+        )
+
+        // Get the playhead somewhere that isn't zero first, or "it ended up at zero" would prove
+        // nothing — it would just be where playback had not yet left.
+        TestPlayerRunHelper.playUntilPosition(player, 0, 700)
+        val before = player.currentPosition
+        assertTrue("expected playback to have advanced, was ${before}ms", before > 0)
+
+        player.seekTo(300)
+        TestPlayerRunHelper.runUntilPendingCommandsAreFullyHandled(player)
+
+        assertEquals(
+            "asked for 300 ms from ${before}ms and got the very start — the bug the reader saw",
+            0L,
+            player.currentPosition
+        )
+    }
+
+    // ⑬ The replay-only URI: served from disk, and the whole point is that it plays without
+    // touching the network. This is the path a reader jump re-prepares onto.
+    @Test
+    fun `a replay-only read plays and seeks without a single request`() {
+        server.enqueue(mp3Response())
+        server.enqueue(MockResponse().setResponseCode(500).setBody("a replay must never re-POST"))
+
+        speak(request)
+        runUntilEnded()
+        assertEquals(1, server.requestCount)
+
+        val key = CacheKeys.forRequest(request)
+        player.setMediaItem(MediaItem.fromUri(registry.cachedUriForKey(key)))
+        player.prepare()
+        player.play()
+        TestPlayerRunHelper.runUntilPlaybackState(player, Player.STATE_READY)
+
+        // Prepared from the finished file, so this one *does* have a seek map — which is what makes
+        // REPREPARE a fix rather than a shuffle.
+        assertTrue(player.isCurrentMediaItemSeekable)
+        val target = player.duration / 2
+        player.seekTo(target)
+        TestPlayerRunHelper.runUntilPendingCommandsAreFullyHandled(player)
+        assertEquals(target.toDouble(), player.currentPosition.toDouble(), 60.0)
+
+        runUntilEnded()
+        assertNull(player.playerError)
+        assertEquals(1, server.requestCount)
+    }
+
+    // ⑮ REPREPARE, exactly as PlaybackService.readFrom performs it: same read, prepared again from
+    // the finished file with a start position. This is the branch that rescues a tap on a read that
+    // began life as a stream, so it needs to be shown landing where it was aimed — not merely not
+    // crashing — and costing nothing.
+    @Test
+    fun `re-preparing a cached read at a position starts there, for free`() {
+        server.enqueue(mp3Response())
+        server.enqueue(MockResponse().setResponseCode(500).setBody("a re-prepare must never re-POST"))
+
+        speak(request)
+        runUntilEnded()
+        assertEquals(1, server.requestCount)
+
+        val key = CacheKeys.forRequest(request)
+        val target = 600L
+        player.setMediaItem(MediaItem.fromUri(registry.cachedUriForKey(key)), target)
+        player.prepare()
+        player.play()
+        TestPlayerRunHelper.runUntilPlaybackState(player, Player.STATE_READY)
+
+        assertEquals(target.toDouble(), player.currentPosition.toDouble(), 60.0)
+        assertEquals(1, server.requestCount)
+    }
+
+    // ⑭ The new billing fence. The audio cache is a 50 MB LRU in cacheDir, so bytes the user was
+    // told are free to replay can be gone by the time they press play. Opening at byte zero is
+    // indistinguishable from a first read, so position alone cannot protect this — only the URI
+    // can. It must fail loudly instead of quietly spending characters.
+    @Test
+    fun `a replay-only read whose audio is gone fails instead of re-synthesising`() {
+        server.enqueue(mp3Response())
+
+        player.setMediaItem(MediaItem.fromUri(registry.cachedUriForKey(CacheKeys.forRequest(request))))
+        player.prepare()
+        player.play()
+        val error = TestPlayerRunHelper.runUntilError(player)
+
+        assertEquals(0, server.requestCount)
+        assertTrue(causeChain(error).any { it is IOException })
+    }
+
     private fun mp3Response(body: ByteArray = audio): MockResponse =
         MockResponse()
             .setHeader("Content-Type", "audio/mpeg")

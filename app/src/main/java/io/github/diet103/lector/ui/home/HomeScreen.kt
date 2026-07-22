@@ -199,8 +199,8 @@ fun HomeScreen(
                 onSpeak = {
                     val active = controller ?: return@MiniPlayer
                     container.lastError.clear()
-                    val uri = container.beginRead(text.trim(), ReadSource.TRY_IT)
-                    active.setMediaItem(MediaItem.Builder().setMediaId(uri.lastPathSegment!!).build())
+                    val mediaId = container.beginRead(text.trim(), ReadSource.TRY_IT)
+                    active.setMediaItem(MediaItem.Builder().setMediaId(mediaId).build())
                     active.prepare()
                     active.play()
                 }

@@ -2,16 +2,20 @@ package io.github.diet103.lector.playback
 
 import android.app.PendingIntent
 import android.content.Intent
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
+import io.github.diet103.lector.BuildConfig
 import io.github.diet103.lector.LectorApplication
 import io.github.diet103.lector.MainActivity
+import io.github.diet103.lector.app.AppContainer
 import io.github.diet103.lector.history.HistoryEntry
 import io.github.diet103.lector.history.ReadSource
 import kotlinx.coroutines.CoroutineScope
@@ -34,6 +38,8 @@ class PlaybackService : MediaSessionService() {
     private var mediaSession: MediaSession? = null
     private lateinit var player: ExoPlayer
     private lateinit var sessionCallback: TtsSessionCallback
+    private lateinit var container: AppContainer
+    private lateinit var historyRecorder: HistoryRecorder
 
     private val idleHandler = Handler(Looper.getMainLooper())
     private val idleStop = Runnable { stopSelf() }
@@ -42,7 +48,7 @@ class PlaybackService : MediaSessionService() {
 
     override fun onCreate() {
         super.onCreate()
-        val container = (application as LectorApplication).container
+        container = (application as LectorApplication).container
 
         player = TtsPlayerFactory.create(
             context = this,
@@ -67,17 +73,18 @@ class PlaybackService : MediaSessionService() {
             PendingIntent.FLAG_IMMUTABLE
         )
 
-        sessionCallback = TtsSessionCallback(container.registry) {
-            player.currentMediaItem?.mediaId?.let(container::isFullyCached) == true
-        }
+        sessionCallback = TtsSessionCallback(
+            registry = container.registry,
+            isFullyCached = container::isFullyCached,
+            readFrom = ::readFrom
+        )
         mediaSession = MediaSession.Builder(this, player)
             .setCallback(sessionCallback)
             .setSessionActivity(sessionActivity)
             .build()
 
-        player.addListener(SeekAvailability(container))
-
-        player.addListener(HistoryRecorder(container))
+        historyRecorder = HistoryRecorder(container)
+        player.addListener(historyRecorder)
 
         // Speed is applied by the player, never by the API — so dragging the slider re-pitches
         // what's already playing and cannot re-synthesise or re-bill (PLAN §6 P6).
@@ -87,63 +94,62 @@ class PlaybackService : MediaSessionService() {
     }
 
     /**
-     * Decides, per read, whether seeking is allowed at all (v0.2 reader).
+     * The reader's "start reading from here", and the **only** place that decides whether a jump is
+     * allowed (v0.2). See [SeekDecision] for the rule and why both of its inputs are needed.
      *
-     * Seeking is stripped from the session by default because ElevenLabs ignores `Range`: a scrub
-     * mid-stream would re-download from byte zero, bill the whole text again, and splice a
-     * different generation. But a read whose bytes are *entirely on disk* is served by the cache,
-     * so seeking inside it costs nothing — which is what makes the reader's tap-a-word possible.
+     * This used to be split between a listener here that handed out seek commands at item
+     * transitions and a cache check inside the reader screen. The two drifted — a read that was
+     * still downloading when it started playing was denied for the rest of its life, while the
+     * reader decided it *was* allowed the moment the download finished — so the reader called
+     * `seekTo`, Media3 silently dropped an ungranted command, and tapping a word did nothing.
+     * Deciding here, at the moment of the tap, with the cache and the player both in hand, is what
+     * makes that class of bug impossible rather than merely fixed.
      *
-     * Cache state is the only signal used. Deliberately not the player's own `duration` or
-     * `isCurrentMediaItemSeekable`: those come from the constant-bitrate estimate and were never
-     * verified for a partially-downloaded read (see TtsStreamingBillingTest). And
-     * [GuardedUpstreamDataSource] remains the net underneath — if a seek ever slips through on an
-     * uncached read it fails loudly rather than quietly costing money.
+     * @return the reply bundle for [ReadFromCommand].
      */
-    private inner class SeekAvailability(
-        private val container: io.github.diet103.lector.app.AppContainer
-    ) : Player.Listener {
+    private fun readFrom(positionMs: Long): Bundle {
+        val key = player.currentMediaItem?.mediaId
+        val cached = key != null && container.isFullyCached(key)
+        // Read before acting: a re-prepare changes it, and a log that reported the *result* rather
+        // than the reason would be worse than no log at all.
+        val canSeek = player.isCurrentMediaItemSeekable
+        val decision = SeekDecision.decide(cached, canSeek)
 
-        // 🔴 KNOWN BROKEN — see CLAUDE.md "OPEN BUG". Re-evaluating only here and at STATE_ENDED
-        // means a read that is still downloading is denied at transition time and never re-granted,
-        // while ReaderScreen's own cache check flips to true mid-playback. The two disagree, the
-        // controller's seekTo is silently dropped, and tap-to-seek fails for everything that wasn't
-        // already fully cached. The fix is to stop having two authorities, not to add a third
-        // re-check here.
-        override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-            val key = mediaItem?.mediaId
-            // Deny first: a transition must never leave the previous read's grant in place.
-            applySeek(key != null && container.isFullyCached(key))
-        }
+        when {
+            key == null || decision == SeekDecision.REFUSE -> Unit
 
-        /**
-         * A read only becomes fully cached at the moment it finishes arriving, so re-check then —
-         * otherwise the first play-through of something stays un-seekable until the next time it
-         * is opened.
-         */
-        override fun onPlaybackStateChanged(playbackState: Int) {
-            if (playbackState != Player.STATE_ENDED) return
-            val key = player.currentMediaItem?.mediaId ?: return
-            applySeek(container.isFullyCached(key))
-        }
+            decision == SeekDecision.SEEK -> player.seekTo(positionMs)
 
-        private fun applySeek(allowed: Boolean) {
-            val session = mediaSession ?: return
-            val commands = if (allowed) {
-                sessionCallback.cachedSeekPlayerCommands
-            } else {
-                sessionCallback.availablePlayerCommands
-            }
-            session.connectedControllers.forEach { controller ->
-                // The notification keeps a constant set of controls either way — a scrubber that
-                // appears only for cached reads would be worse than none.
-                if (session.isMediaNotificationController(controller)) return@forEach
-                session.setAvailableCommands(
-                    controller,
-                    MediaSession.ConnectionResult.DEFAULT_SESSION_COMMANDS,
-                    commands
+            else -> {
+                // Same read, prepared again from the finished file so it finally has a seek map.
+                // Tell the recorder first, or it would log this as a fresh read and the re-record
+                // would wipe the duration the reader has just learned.
+                historyRecorder.expectSameRead()
+                player.setMediaItem(
+                    MediaItem.Builder()
+                        .setMediaId(key)
+                        .setUri(container.registry.cachedUriForKey(key))
+                        .build(),
+                    positionMs
                 )
+                player.prepare()
+                player.play()
             }
+        }
+
+        if (BuildConfig.DEBUG) {
+            // Shapes only, never the text. Its absence is why this bug survived three rounds of
+            // "it still doesn't work" with nothing in logcat to point at.
+            Log.d(
+                TAG,
+                "readFrom key=${key?.take(8)} cached=$cached playerCanSeek=$canSeek " +
+                    "decision=$decision target=${positionMs}ms landed=${player.currentPosition}ms"
+            )
+        }
+
+        return Bundle().apply {
+            putString(ReadFromCommand.RESULT_DECISION, decision.name)
+            putLong(ReadFromCommand.RESULT_POSITION_MS, player.currentPosition)
         }
     }
 
@@ -156,15 +162,33 @@ class PlaybackService : MediaSessionService() {
      * read still gets a row, just without them, and honestly reads as not-free-to-replay.
      */
     private inner class HistoryRecorder(
-        private val container: io.github.diet103.lector.app.AppContainer
+        private val container: AppContainer
     ) : Player.Listener {
 
         /** Guards against re-recording the same item on every pause/resume within one read. */
         private var recordedKey: String? = null
 
-        /** A new item is a new read, even if it's the same text being replayed. */
+        /**
+         * Set when the next item change is the reader jumping to a word, which re-prepares the
+         * same read rather than starting a different one.
+         */
+        private var sameReadExpected = false
+
+        /** @see readFrom */
+        fun expectSameRead() {
+            sameReadExpected = true
+        }
+
+        /**
+         * A new item is a new read, even if it's the same text being replayed — except when we
+         * re-prepared it ourselves to make it seekable. Treating that as new would write the row
+         * again, and [HistoryStore.record][io.github.diet103.lector.history.HistoryStore.record]
+         * replaces the row, losing the duration the reader depends on for its highlight.
+         */
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-            recordedKey = null
+            val continuing = sameReadExpected && mediaItem?.mediaId == recordedKey
+            sameReadExpected = false
+            if (!continuing) recordedKey = null
         }
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -258,5 +282,6 @@ class PlaybackService : MediaSessionService() {
 
     private companion object {
         const val IDLE_STOP_MS = 10L * 60 * 1000
+        const val TAG = "Lector"
     }
 }

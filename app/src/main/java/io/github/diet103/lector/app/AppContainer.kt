@@ -84,9 +84,15 @@ class AppContainer(context: Context) {
     )
 
     /**
-     * Starts a read: builds the request, remembers where it came from, and returns the
-     * `lector://tts/<key>` URI to hand the player. Every entry point goes through here, which is
-     * what keeps the history honest about its own sources.
+     * Starts a read: builds the request, remembers where it came from, and returns the **media id**
+     * to hand a `MediaController`. Every entry point goes through here, which is what keeps the
+     * history honest about its own sources.
+     *
+     * An id rather than a URI on purpose. Which URI a key resolves to — the streaming
+     * `lector://tts/` or the replay-only `lector://cached/` — is decided by
+     * [TtsSessionCallback][io.github.diet103.lector.playback.TtsSessionCallback] at the moment
+     * playback starts, so it reflects the cache as it is then and not as it was when the screen
+     * was drawn. Handing a URI back here would invite a caller to use a stale one.
      *
      * Nothing is written to disk yet — [PlaybackService][io.github.diet103.lector.playback.PlaybackService]
      * records the row only once audio actually starts, so a read that dies on a bad key never
@@ -97,18 +103,22 @@ class AppContainer(context: Context) {
         source: ReadSource,
         title: String? = null,
         sourceUrl: String? = null
-    ): Uri = registry.register(
-        speakRequest(text),
-        ReadContext(source = source, title = title, sourceUrl = sourceUrl)
+    ): String = mediaId(
+        registry.register(
+            speakRequest(text),
+            ReadContext(source = source, title = title, sourceUrl = sourceUrl)
+        )
     )
 
     /**
-     * Re-registers a stored read so it can be replayed. The registry is memory-only, so without
-     * this a cached read becomes unplayable the moment the process dies — history is what gives it
-     * somewhere to come back from. No [ReadContext]: the row already exists and only its
-     * `lastReadAt` moves.
+     * Re-registers a stored read so it can be replayed, returning its media id. The registry is
+     * memory-only, so without this a cached read becomes unplayable the moment the process dies —
+     * history is what gives it somewhere to come back from. No [ReadContext]: the row already
+     * exists and only its `lastReadAt` moves.
      */
-    fun replay(entry: HistoryEntry): Uri = registry.register(entry.toSpeakRequest())
+    fun replay(entry: HistoryEntry): String = mediaId(registry.register(entry.toSpeakRequest()))
+
+    private fun mediaId(uri: Uri): String = uri.lastPathSegment.orEmpty()
 
     /**
      * Whether replaying this costs nothing — i.e. every byte is already on disk. Used to label

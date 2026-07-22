@@ -16,6 +16,12 @@ import java.io.IOException
  *    write-through cache would silently never be written (verified against Media3 1.10 source).
  *  - The cache key is the content hash, set explicitly so CacheDataSource keys by content,
  *    not by URL.
+ *
+ * A `lector://cached/<key>` read is left pointing at itself rather than rewritten. It only ever
+ * needs the cache key; if the cache misses, the un-rewritten URI is what
+ * [GuardedUpstreamDataSource] recognises and refuses, so a stored read can never quietly become a
+ * purchase. The registry is deliberately *not* consulted for it either — a replay needs no request
+ * body, and requiring one would break replaying after the in-memory registry has been lost.
  */
 class TtsDataSpecResolver(
     private val registry: SpeakRequestRegistry,
@@ -26,6 +32,14 @@ class TtsDataSpecResolver(
     override fun resolveDataSpec(dataSpec: DataSpec): DataSpec {
         val key = dataSpec.uri.lastPathSegment
             ?: throw IOException("Lector: malformed TTS uri ${dataSpec.uri}")
+
+        if (SpeakRequestRegistry.isCacheOnly(dataSpec.uri)) {
+            return dataSpec.buildUpon()
+                .setKey(key)
+                .setFlags(dataSpec.flags and DataSpec.FLAG_DONT_CACHE_IF_LENGTH_UNKNOWN.inv())
+                .build()
+        }
+
         val request = registry.byKey(key)
             ?: throw IOException("Lector: no registered speak request for $key")
 

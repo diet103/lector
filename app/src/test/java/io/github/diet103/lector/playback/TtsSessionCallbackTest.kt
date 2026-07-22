@@ -35,6 +35,10 @@ class TtsSessionCallbackTest {
 
     // No scrubber anywhere (notification/QS/Assistant) → no seek can re-open the stream at an
     // offset and re-bill. Billing defense #2 (PLAN §4).
+    //
+    // Unconditional, and it must stay that way. A version of this handed the seek commands out
+    // whenever the current read happened to be fully cached, so the guarantee held only some of
+    // the time and the reader could not tell when. The reader asks with ReadFromCommand instead.
     @Test
     fun `no seek command is ever offered to a controller`() {
         val commands = callback.availablePlayerCommands
@@ -61,6 +65,20 @@ class TtsSessionCallbackTest {
         assertEquals(registry.uriForKey(key), resolved.single().localConfiguration?.uri)
     }
 
+    // Anything already on disk is pointed at the replay-only URI, which GuardedUpstreamDataSource
+    // refuses to fetch. So a read the user was told is free cannot quietly become a purchase if the
+    // cache is evicted between the badge being drawn and playback starting.
+    @Test
+    fun `a fully cached media id resolves to the replay-only uri`() {
+        val request = SpeakRequest(text = "already on disk", voiceId = "voiceX")
+        val key = registry.register(request).lastPathSegment!!
+        val cachedCallback = TtsSessionCallback(registry, isFullyCached = { it == key })
+
+        val resolved = cachedCallback.resolve(listOf(MediaItem.Builder().setMediaId(key).build()))
+
+        assertEquals(registry.cachedUriForKey(key), resolved.single().localConfiguration?.uri)
+    }
+
     @Test
     fun `an unknown media id passes through without a playable uri`() {
         val resolved = callback.resolve(listOf(MediaItem.Builder().setMediaId("not-registered").build()))
@@ -68,45 +86,28 @@ class TtsSessionCallbackTest {
         assertNull(resolved.single().localConfiguration)
     }
 
-    // Regression: the reader connects its controller *after* playback has already started, so a
-    // grant handed only to already-connected controllers never reached it and every tap-to-seek was
-    // silently dropped. The decision has to be made at connect time too.
+    // Only Lector's own screens may move the playhead. Everything else — Assistant, a car head
+    // unit, Bluetooth — can play and pause and nothing more.
     @Test
-    fun `a controller connecting to a fully cached read may seek within it`() {
-        val commands = callback.commandsFor(isMediaNotification = false, seekAllowed = true)
+    fun `our own ui may ask to read from a point`() {
+        val commands = callback.sessionCommandsFor(isOwnPackage = true, isMediaNotification = false)
 
-        assertTrue(commands.contains(Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM))
-        assertTrue(commands.contains(Player.COMMAND_SEEK_TO_DEFAULT_POSITION))
+        assertTrue(commands.contains(ReadFromCommand.COMMAND))
     }
 
     @Test
-    fun `a controller connecting to a read that is not cached may not seek`() {
-        val commands = callback.commandsFor(isMediaNotification = false, seekAllowed = false)
+    fun `another app may not ask to read from a point`() {
+        val commands = callback.sessionCommandsFor(isOwnPackage = false, isMediaNotification = false)
 
-        for (command in allSeekCommands) {
-            assertFalse("seek command $command must be stripped", commands.contains(command))
-        }
+        assertFalse(commands.contains(ReadFromCommand.COMMAND))
     }
 
-    // The shade's controls stay the same whatever is playing, rather than growing a scrubber that
-    // sometimes costs money and sometimes doesn't.
+    // The shade's controls stay the same whatever is playing, rather than growing a way to scrub
+    // that sometimes costs money and sometimes doesn't.
     @Test
-    fun `the media notification never gets seeking, even on a cached read`() {
-        val commands = callback.commandsFor(isMediaNotification = true, seekAllowed = true)
+    fun `the media notification may not ask to read from a point`() {
+        val commands = callback.sessionCommandsFor(isOwnPackage = true, isMediaNotification = true)
 
-        for (command in allSeekCommands) {
-            assertFalse("seek command $command must be stripped", commands.contains(command))
-        }
-    }
-
-    // Even when granted, seeking stays confined to the current read: skipping between items would
-    // start a different read, and that one might not be cached.
-    @Test
-    fun `a cached grant still cannot seek to another media item`() {
-        val commands = callback.commandsFor(isMediaNotification = false, seekAllowed = true)
-
-        assertFalse(commands.contains(Player.COMMAND_SEEK_TO_MEDIA_ITEM))
-        assertFalse(commands.contains(Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM))
-        assertFalse(commands.contains(Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM))
+        assertFalse(commands.contains(ReadFromCommand.COMMAND))
     }
 }

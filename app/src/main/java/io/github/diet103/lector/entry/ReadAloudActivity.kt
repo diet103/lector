@@ -352,13 +352,13 @@ private fun SpeakHandoff(
             }
             controller = connected
             connected.addListener(listener)
-            val uri = container.beginRead(
+            val mediaId = container.beginRead(
                 text = speak.text,
                 source = speak.source,
                 title = speak.title,
                 sourceUrl = speak.sourceUrl
             )
-            connected.setMediaItem(MediaItem.Builder().setMediaId(uri.lastPathSegment!!).build())
+            connected.setMediaItem(MediaItem.Builder().setMediaId(mediaId).build())
             connected.prepare()
             connected.play()
         }, MoreExecutors.directExecutor())

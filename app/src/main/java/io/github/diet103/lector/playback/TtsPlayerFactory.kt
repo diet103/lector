@@ -33,6 +33,13 @@ object TtsPlayerFactory {
 
     private const val FAST_START_BUFFER_MS = 500
 
+    /**
+     * Effectively "no time limit" — longer than any read the caps allow (40k characters is roughly
+     * 47 minutes). Media3's own `DEFAULT_AUDIO_BUFFER_SIZE` of 12.5 MB stays the real brake, which
+     * is why [DefaultLoadControl.Builder.setTargetBufferBytes] is deliberately left alone.
+     */
+    private const val EAGER_BUFFER_MS = 60 * 60 * 1000
+
     @SuppressLint("VisibleForTests")
     fun create(
         context: Context,
@@ -56,10 +63,22 @@ object TtsPlayerFactory {
         val mediaSourceFactory = ProgressiveMediaSource.Factory(resolving)
             .setLoadErrorHandlingPolicy(SingleShotLoadErrorHandlingPolicy())
 
+        // Drain the response as fast as the network allows instead of trickling 50 s ahead of the
+        // playhead (Media3's default). The characters were billed the instant the POST went out, so
+        // pulling the rest early costs nothing — but it decides whether the reader works at all:
+        // seeking is only safe on cached audio, and Media3 builds a *non-seekable* seek map for an
+        // MP3 whose length it doesn't know yet (a chunked TTS response). Under the old ceiling a
+        // read wasn't fully on disk until it was nearly over, so tapping a word did nothing useful
+        // until then — and `duration` stayed TIME_UNSET, so nothing highlighted either.
+        //
+        // Only the streaming values move. `lector://` is never one of Media3's local-playback
+        // schemes (file/content/data/android.resource/rawresource/asset), so that branch can't be
+        // taken — and its `prioritizeTimeOverSizeThresholds` default of true would ignore the byte
+        // ceiling and let an hour of audio pile up in memory.
         val loadControl = DefaultLoadControl.Builder()
-            .setBufferDurationsMs(
-                DefaultLoadControl.DEFAULT_MIN_BUFFER_MS,
-                DefaultLoadControl.DEFAULT_MAX_BUFFER_MS,
+            .setBufferDurationsMsForStreaming(
+                EAGER_BUFFER_MS,
+                EAGER_BUFFER_MS,
                 FAST_START_BUFFER_MS,
                 FAST_START_BUFFER_MS * 2
             )

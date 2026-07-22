@@ -28,10 +28,31 @@ class SpeakRequestRegistry {
     fun contextFor(key: String): ReadContext? = contexts[key]
 
     /** The player-facing URI for a key; its last path segment is what the resolver reads back. */
-    fun uriForKey(key: String): Uri = Uri.parse("$SCHEME://tts/$key")
+    fun uriForKey(key: String): Uri = Uri.parse("$SCHEME://$HOST_STREAM/$key")
+
+    /**
+     * The same key, but declared replay-only: [GuardedUpstreamDataSource][io.github.diet103.lector.playback.GuardedUpstreamDataSource]
+     * refuses to open the network for it *at all*, so playing one cannot spend characters no matter
+     * what else goes wrong.
+     *
+     * That matters because the ordinary guard only refuses a *nonzero* byte offset. Preparing a
+     * read from the start is normally exactly what should reach ElevenLabs — but for something the
+     * user was told is free to replay, it must not. The audio cache is a 50 MB LRU in `cacheDir`,
+     * so an old read's bytes can be evicted (or purged by the OS) between the moment we check and
+     * the moment we open. This URI turns that from a silent charge into a loud failure.
+     */
+    fun cachedUriForKey(key: String): Uri = Uri.parse("$SCHEME://$HOST_CACHED/$key")
 
     companion object {
         const val SCHEME = "lector"
+
+        /** May fetch from ElevenLabs if the cache misses. */
+        const val HOST_STREAM = "tts"
+
+        /** Must be served from disk or fail. */
+        const val HOST_CACHED = "cached"
+
+        fun isCacheOnly(uri: Uri): Boolean = uri.host == HOST_CACHED
     }
 }
 
