@@ -122,6 +122,17 @@ class HistoryStore(context: Context) : SQLiteOpenHelper(
     }
 
     /**
+     * Records how long a read's audio runs, as soon as the player knows — which is well before the
+     * read finishes, and is what the reader needs to map words onto the timeline. Waiting for the
+     * end would leave every unfinished read permanently un-highlightable.
+     */
+    fun markDuration(key: String, durationMs: Long) {
+        val values = ContentValues().apply { put(COL_DURATION_MS, durationMs) }
+        val updated = writableDatabase.update(TABLE, values, "$COL_KEY = ?", arrayOf(key))
+        if (updated > 0) _revision.value++
+    }
+
+    /**
      * Fills in what only the end of playback knows. Kept separate from [record] because a read is
      * written the moment it starts making sound, long before these are known — and a read that is
      * abandoned halfway should still appear, just without a duration.

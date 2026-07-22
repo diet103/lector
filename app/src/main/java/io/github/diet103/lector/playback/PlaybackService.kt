@@ -67,7 +67,9 @@ class PlaybackService : MediaSessionService() {
             PendingIntent.FLAG_IMMUTABLE
         )
 
-        sessionCallback = TtsSessionCallback(container.registry)
+        sessionCallback = TtsSessionCallback(container.registry) {
+            player.currentMediaItem?.mediaId?.let(container::isFullyCached) == true
+        }
         mediaSession = MediaSession.Builder(this, player)
             .setCallback(sessionCallback)
             .setSessionActivity(sessionActivity)
@@ -104,18 +106,19 @@ class PlaybackService : MediaSessionService() {
 
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             val key = mediaItem?.mediaId
-            if (key == null) {
-                applySeek(false)
-                return
-            }
             // Deny first: a transition must never leave the previous read's grant in place.
-            applySeek(false)
-            serviceScope.launch {
-                val cached = withContext(Dispatchers.IO) {
-                    container.history.byKey(key)?.let(container::isFullyCached) == true
-                }
-                if (cached && player.currentMediaItem?.mediaId == key) applySeek(true)
-            }
+            applySeek(key != null && container.isFullyCached(key))
+        }
+
+        /**
+         * A read only becomes fully cached at the moment it finishes arriving, so re-check then —
+         * otherwise the first play-through of something stays un-seekable until the next time it
+         * is opened.
+         */
+        override fun onPlaybackStateChanged(playbackState: Int) {
+            if (playbackState != Player.STATE_ENDED) return
+            val key = player.currentMediaItem?.mediaId ?: return
+            applySeek(container.isFullyCached(key))
         }
 
         private fun applySeek(allowed: Boolean) {

@@ -6,6 +6,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.database.StandaloneDatabaseProvider
 import androidx.media3.datasource.HttpDataSource
+import androidx.media3.datasource.cache.ContentMetadata
 import androidx.media3.datasource.cache.NoOpCacheEvictor
 import androidx.media3.datasource.cache.SimpleCache
 import androidx.media3.exoplayer.ExoPlayer
@@ -288,6 +289,30 @@ class TtsStreamingBillingTest {
         assertEquals(1, server.requestCount)
     }
 
+
+    // ⑪ v0.2 reader: does Media3 record the content length of a chunked, unknown-length response
+    // once it has been fully read? If it does, "is this read entirely on disk?" can be answered
+    // from the cache itself rather than from bookkeeping of our own that may never have run.
+    @Test
+    fun `a completed read records its content length in the cache`() {
+        server.enqueue(mp3Response())
+
+        speak(request)
+        runUntilEnded()
+
+        val key = CacheKeys.forRequest(request)
+        val length = ContentMetadata.getContentLength(cache.getContentMetadata(key))
+        assertEquals(audio.size.toLong(), length)
+        assertEquals(audio.size.toLong(), cache.getCachedBytes(key, 0, length))
+    }
+
+    // And the negative: a read still arriving must NOT look complete, or the reader would offer
+    // seeking on something that would re-bill.
+    @Test
+    fun `an unread key has no recorded content length`() {
+        val length = ContentMetadata.getContentLength(cache.getContentMetadata("never-fetched"))
+        assertEquals(C.LENGTH_UNSET.toLong(), length)
+    }
 
     private fun mp3Response(body: ByteArray = audio): MockResponse =
         MockResponse()

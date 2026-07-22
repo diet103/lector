@@ -21,7 +21,14 @@ import io.github.diet103.lector.data.SpeakRequestRegistry
  *    re-POST paid audio the user never asked to hear again.
  */
 class TtsSessionCallback(
-    private val registry: SpeakRequestRegistry
+    private val registry: SpeakRequestRegistry,
+    /**
+     * Whether the read currently loaded is entirely on disk, and so free to seek within. Consulted
+     * at **connect** time as well as on item changes: the reader screen builds its controller after
+     * playback is already under way, so a connect that always returned the stripped set would leave
+     * it permanently unable to seek no matter what the service granted later.
+     */
+    private val seekAllowedNow: () -> Boolean = { false }
 ) : MediaSession.Callback {
 
     /** Default player commands with every seek removed. Exposed so a test can pin the guarantee. */
@@ -60,12 +67,25 @@ class TtsSessionCallback(
         )
         .build()
 
+    /**
+     * Which command set a controller gets. Pure and session-free so the rule can be pinned by a
+     * test — the bug this replaced was a controller that connected *after* playback had started
+     * and so never received the grant the service had already handed out.
+     */
+    fun commandsFor(isMediaNotification: Boolean, seekAllowed: Boolean): Player.Commands =
+        if (!isMediaNotification && seekAllowed) cachedSeekPlayerCommands else availablePlayerCommands
+
     override fun onConnect(
         session: MediaSession,
         controller: MediaSession.ControllerInfo
     ): MediaSession.ConnectionResult =
         MediaSession.ConnectionResult.AcceptedResultBuilder(session)
-            .setAvailablePlayerCommands(availablePlayerCommands)
+            .setAvailablePlayerCommands(
+                commandsFor(
+                    isMediaNotification = session.isMediaNotificationController(controller),
+                    seekAllowed = seekAllowedNow()
+                )
+            )
             .build()
 
     override fun onAddMediaItems(

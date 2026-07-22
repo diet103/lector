@@ -67,4 +67,46 @@ class TtsSessionCallbackTest {
 
         assertNull(resolved.single().localConfiguration)
     }
+
+    // Regression: the reader connects its controller *after* playback has already started, so a
+    // grant handed only to already-connected controllers never reached it and every tap-to-seek was
+    // silently dropped. The decision has to be made at connect time too.
+    @Test
+    fun `a controller connecting to a fully cached read may seek within it`() {
+        val commands = callback.commandsFor(isMediaNotification = false, seekAllowed = true)
+
+        assertTrue(commands.contains(Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM))
+        assertTrue(commands.contains(Player.COMMAND_SEEK_TO_DEFAULT_POSITION))
+    }
+
+    @Test
+    fun `a controller connecting to a read that is not cached may not seek`() {
+        val commands = callback.commandsFor(isMediaNotification = false, seekAllowed = false)
+
+        for (command in allSeekCommands) {
+            assertFalse("seek command $command must be stripped", commands.contains(command))
+        }
+    }
+
+    // The shade's controls stay the same whatever is playing, rather than growing a scrubber that
+    // sometimes costs money and sometimes doesn't.
+    @Test
+    fun `the media notification never gets seeking, even on a cached read`() {
+        val commands = callback.commandsFor(isMediaNotification = true, seekAllowed = true)
+
+        for (command in allSeekCommands) {
+            assertFalse("seek command $command must be stripped", commands.contains(command))
+        }
+    }
+
+    // Even when granted, seeking stays confined to the current read: skipping between items would
+    // start a different read, and that one might not be cached.
+    @Test
+    fun `a cached grant still cannot seek to another media item`() {
+        val commands = callback.commandsFor(isMediaNotification = false, seekAllowed = true)
+
+        assertFalse(commands.contains(Player.COMMAND_SEEK_TO_MEDIA_ITEM))
+        assertFalse(commands.contains(Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM))
+        assertFalse(commands.contains(Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM))
+    }
 }

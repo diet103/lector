@@ -35,6 +35,7 @@ import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
@@ -45,7 +46,9 @@ import io.github.diet103.lector.history.EstimatedReadingClock
 import io.github.diet103.lector.history.HistoryEntry
 import io.github.diet103.lector.history.TextSpans
 import io.github.diet103.lector.playback.PlaybackService
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 
 /**
  * One stored read, shown as text you can follow and tap into (v0.2).
@@ -76,11 +79,17 @@ fun ReaderScreen(
     var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
     var caretOffset by remember { mutableIntStateOf(0) }
 
-    // Only ever true for a read that finished and whose bytes survived the cache's 50 MB LRU.
+    // True whenever every byte is on disk — asked of the cache, so it holds for a read that was
+    // never listened through to the end.
     val seekable = remember(entry.key) { container.isFullyCached(entry) }
-    val clock = remember(entry.key, entry.durationMs) {
-        EstimatedReadingClock(entry.text, entry.durationMs ?: 0L)
-    }
+
+    // The player is the authority on duration and knows it as soon as it prepares. The stored
+    // value is only a starting point, so opening a read for the first time still highlights.
+    var durationMs by remember(entry.key) { mutableStateOf(entry.durationMs ?: 0L) }
+    val clock = remember(entry.key, durationMs) { EstimatedReadingClock(entry.text, durationMs) }
+
+    // A tap made before the player knows how long the audio is. Applied the moment it does.
+    var pendingSeekOffset by remember(entry.key) { mutableStateOf<Int?>(null) }
 
     DisposableEffect(Unit) {
         val token = SessionToken(context, ComponentName(context, PlaybackService::class.java))
@@ -112,13 +121,29 @@ fun ReaderScreen(
 
     // The player has no position callback, so it gets polled — but only while this read is the one
     // actually playing, so a backgrounded reader isn't waking up ten times a second for nothing.
+    // The same loop learns the duration, which is why it also runs once when not playing.
     LaunchedEffect(controller, isPlaying, isCurrent) {
         val active = controller ?: return@LaunchedEffect
-        while (isPlaying && isCurrent) {
-            positionMs = active.currentPosition
+        do {
+            if (isCurrent) {
+                positionMs = active.currentPosition
+                val reported = active.duration
+                if (reported != C.TIME_UNSET && reported > 0 && reported != durationMs) {
+                    durationMs = reported
+                    // Persist it so the list and the next open don't have to rediscover it.
+                    withContext(Dispatchers.IO) {
+                        container.history.markDuration(entry.key, reported)
+                    }
+                }
+                pendingSeekOffset?.let { offset ->
+                    if (durationMs > 0) {
+                        active.seekTo(EstimatedReadingClock(entry.text, durationMs).positionFor(offset))
+                        pendingSeekOffset = null
+                    }
+                }
+            }
             delay(TICK_MS)
-        }
-        if (!isPlaying) positionMs = active.currentPosition
+        } while (isPlaying && isCurrent)
     }
 
     // While this read is playing the caret follows the voice; otherwise it stays where it was last
@@ -131,9 +156,9 @@ fun ReaderScreen(
     val word = remember(caretOffset, entry.key) { TextSpans.wordAt(entry.text, caretOffset) }
 
     val tint = MaterialTheme.colorScheme.primaryContainer
-    val highlighted = remember(sentence, word, isCurrent) {
+    val highlighted = remember(sentence, word, isCurrent, durationMs) {
         AnnotatedString.Builder(entry.text).apply {
-            if (isCurrent && entry.durationMs != null) {
+            if (isCurrent && durationMs > 0) {
                 if (!sentence.isEmpty()) {
                     addStyle(SpanStyle(background = tint), sentence.first, sentence.last + 1)
                 }
@@ -155,9 +180,17 @@ fun ReaderScreen(
                 MediaItem.Builder().setMediaId(container.replay(entry).lastPathSegment!!).build()
             )
             active.prepare()
+            isCurrent = true
         }
-        if (seekable && entry.durationMs != null) {
+        if (!seekable) {
+            active.play()
+            return
+        }
+        if (durationMs > 0) {
             active.seekTo(clock.positionFor(charOffset))
+        } else {
+            // Just prepared: the duration arrives a beat later, and the polling loop applies this.
+            pendingSeekOffset = charOffset
         }
         active.play()
     }

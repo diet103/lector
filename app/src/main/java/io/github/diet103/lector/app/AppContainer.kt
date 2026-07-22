@@ -2,7 +2,9 @@ package io.github.diet103.lector.app
 
 import android.content.Context
 import android.net.Uri
+import androidx.media3.common.C
 import androidx.media3.datasource.cache.Cache
+import androidx.media3.datasource.cache.ContentMetadata
 import io.github.diet103.lector.BuildConfig
 import io.github.diet103.lector.data.ApiKeyStore
 import io.github.diet103.lector.data.KeystoreAesGcmCipher
@@ -111,11 +113,20 @@ class AppContainer(context: Context) {
     /**
      * Whether replaying this costs nothing — i.e. every byte is already on disk. Used to label
      * history entries honestly, and to decide whether seeking may be offered at all.
+     *
+     * Asks the **cache**, not our own history row. An earlier version compared against an
+     * `audioBytes` column written only when a read reached its end, which meant a read you didn't
+     * listen all the way through was permanently mislabelled as costly and permanently un-seekable
+     * — exactly backwards, since not finishing something is the usual reason to open it again.
+     * Media3 records the content length once a response has been fully read even though it arrives
+     * chunked with no length header (pinned by TtsStreamingBillingTest).
      */
-    fun isFullyCached(entry: HistoryEntry): Boolean {
-        val bytes = entry.audioBytes ?: return false
-        return cache.getCachedBytes(entry.key, 0, Long.MAX_VALUE) >= bytes
+    fun isFullyCached(key: String): Boolean {
+        val length = ContentMetadata.getContentLength(cache.getContentMetadata(key))
+        return length != C.LENGTH_UNSET.toLong() && cache.getCachedBytes(key, 0, length) >= length
     }
+
+    fun isFullyCached(entry: HistoryEntry): Boolean = isFullyCached(entry.key)
 
     /** The active truncation cap (PLAN §2), overridable in settings and bounded by the model. */
     val maxChars: Int get() = settings.maxChars.value
