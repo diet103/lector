@@ -104,6 +104,12 @@ class PlaybackService : MediaSessionService() {
         private val container: io.github.diet103.lector.app.AppContainer
     ) : Player.Listener {
 
+        // 🔴 KNOWN BROKEN — see CLAUDE.md "OPEN BUG". Re-evaluating only here and at STATE_ENDED
+        // means a read that is still downloading is denied at transition time and never re-granted,
+        // while ReaderScreen's own cache check flips to true mid-playback. The two disagree, the
+        // controller's seekTo is silently dropped, and tap-to-seek fails for everything that wasn't
+        // already fully cached. The fix is to stop having two authorities, not to add a third
+        // re-check here.
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             val key = mediaItem?.mediaId
             // Deny first: a transition must never leave the previous read's grant in place.
