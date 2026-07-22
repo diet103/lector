@@ -1,6 +1,6 @@
 # Lector — agent context
 
-Select-to-speak Android app streaming ElevenLabs TTS (bring-your-own key). **[PLAN.md](PLAN.md) is the design source of truth** — read §4 (architecture), §6 (phases), and §8 (testing) before substantial work. This file carries session-to-session status and machine specifics.
+Select-to-speak Android app streaming ElevenLabs TTS (bring-your-own key). **[PLAN.md](PLAN.md) is the design source of truth** — read §4 (architecture), §6 (phases), and §8 (testing) before substantial work. This file carries session-to-session status and machine specifics. **[docs/LESSONS.md](docs/LESSONS.md)** holds the transferable Android lessons (toolchain traps, Media3, Keystore, device-testing artifacts) — read it before repeating an afternoon someone already lost.
 
 ## Status — update this section as work lands
 
@@ -29,7 +29,12 @@ Select-to-speak Android app streaming ElevenLabs TTS (bring-your-own key). **[PL
   - `settings.deleteScreenshotAfterReading` (**off by default**): after a screenshot is read, `MediaStore.createDeleteRequest` offers to remove the original. Android 11+ only, and its confirmation dialog is mandatory — a shared image arrives read-only and suppressing that prompt would need manage-all-files, which this app will never request. Only MediaStore URIs qualify.
   - **Device-verified:** Wikipedia link → `extracted=100989 chars` → 492 KB MP3 cached and played; a Reddit link produced no synthesis at all. **108 unit tests green.**
   - **Dependency added:** jsoup 1.22.2 (~500 KB, zero transitive deps, pure JVM so the extractor is unit-tested without Robolectric). Android ships no usable HTML parser.
-- **Next: P7 — hardening + v0.1 release** (PLAN §6). Carry in: **ABI splits are now required** (measured ML Kit cost, see below), and the R8 keep-rule risk is smaller than planned since kotlinx.serialization was never adopted.
+- **Next: P7 — hardening + v0.1 release** (PLAN §6). Start here:
+  1. **ABI splits are now required, not optional.** Measured: ML Kit's `libmlkit_google_ocr_pipeline.so` is ~10.6 MB for arm64-v8a and ~41 MB across all four ABIs (debug APK went 16 → 60 MB). Ship `splits { abi { … } }` or an App Bundle, or the sideload download is indefensible.
+  2. **R8 risk is lower than PLAN assumed** — kotlinx.serialization was never adopted, so the `tts/dto` keep rules PLAN §6 anticipated aren't needed. OkHttp/Media3/ML Kit/jsoup ship their own rules. Still run the full manual matrix on the minified build.
+  3. **Re-test free-tier copy with a throwaway key** — the dev account upgraded to `starter` mid-P5, so all three auth failures in the error map now only reproduce with a different key.
+  4. The user's own review gates from P4–P6 are still open (see each phase above); fold them into the P7 manual matrix rather than tracking separately.
+  5. Everything else per PLAN §6 P7: adaptive + monochrome icon, About with licences, PRIVACY.md on Pages, signing keystore (back it up — losing it strands sideload updaters), `release.yml`, README with the two GIFs.
 
 ## Machine / device (this PC: Windows + WSL2)
 
@@ -38,7 +43,9 @@ Select-to-speak Android app streaming ElevenLabs TTS (bring-your-own key). **[PL
 - Pixel 10 Pro XL over wireless adb at `192.168.4.20:<port>` — the port rotates whenever Wireless debugging toggles; re-run `adb connect` with the new port (pairing persists). Two transports may appear for one phone → always target with `adb -s <ip:port>`.
 - **WSL2 can lock up the Windows host during builds (hit 2026-07-21).** With no cap, WSL2 claims ~50% of host RAM (31 GB of 64 GB here) and never hands it back, so Gradle + the Kotlin daemon + Robolectric's 2 GB test JVMs + dexing the ML Kit APK starved Windows to the point Task Manager wouldn't open. Fixed in `C:\Users\gross\.wslconfig` (`memory=16GB`, `swap=8GB`, `processors=8`, `autoMemoryReclaim=gradual`) — **keep `networkingMode=mirrored`, that's what lets adb reach the phone** — plus `kotlin.daemon.jvmargs=-Xmx2g` in `gradle.properties`. `.wslconfig` changes need `wsl --shutdown` to take effect. Run `./gradlew --stop` after a session and don't leave the adb server running as a long-lived background task.
 - **Android Studio on Windows stomps `local.properties`** with the Windows SDK path (`C:\Users\...`), which overrides `ANDROID_HOME` and breaks WSL CLI builds with "SDK location not found". Rewrite it to `sdk.dir=/root/android-sdk` before building (observed 2026-07-21).
-- `dev.properties` at repo root (**git-ignored, never commit**): `ELEVENLABS_API_KEY` (user's key, free tier, 10k credits/mo, ~40 used) and `DEV_VOICE_ID` (George, `JBFqnCBsd6RMkjVDRZzb`). Injected as debug-only BuildConfig fields.
+- `dev.properties` at repo root (**git-ignored, never commit**): `ELEVENLABS_API_KEY` only — it prefills the onboarding key field on debug builds. `DEV_VOICE_ID` is vestigial; the voice comes from `SettingsRepository` now.
+- **adb device discovery is slow to warm up.** After starting the server, `adb devices` can be empty for ~15 s while mDNS finds the phone; `adb mdns services` shows the current rotating port. Don't conclude the phone is unreachable until you've waited and re-checked.
+- **A screencap captures whatever is on their screen, including personal content.** Launch Lector first, crop to the region you need, and never dump the launcher or another app full-screen into the transcript.
 
 ## Build gotchas — hard-won in P0/P1, do not relitigate
 
@@ -52,7 +59,8 @@ Select-to-speak Android app streaming ElevenLabs TTS (bring-your-own key). **[PL
   - scope-restricted key → 401 `missing_permissions`
   - free tier + library voice → 402 `paid_plan_required`
   - free tier + the account's **own instantly-cloned voice** → 401 `subscription_required` / `ivc_not_permitted`, "Instantly cloned voices are not available on your current plan". **Listing a voice does not mean you can use it** — the voice picker in P6 must gate on `subscription.can_use_instant_voice_cloning`, or users pick a voice that always fails.
-- **The dev account is on `starter` as of 2026-07-21, not free** (the user upgraded mid-session): `can_use_instant_voice_cloning: true`, ~39.2k characters/period, and their cloned voice `zu46RDFDIyBpYPEDjd7f` ("Dieter") now synthesises fine — it is the current `voice_id` in `lector_settings`. So free-tier limits no longer reproduce on this device; use a throwaway free key to retest that copy.
+- **The dev account is on `starter` as of 2026-07-21, not free** (the user upgraded mid-session): `can_use_instant_voice_cloning: true`, ~39.2k characters/period, and their cloned voice `zu46RDFDIyBpYPEDjd7f` ("Dieter") synthesises fine on it. **Free-tier failures no longer reproduce on this device — use a throwaway free key to retest that copy before v0.1.**
+- **All models cost the same per character** (`token_cost_factor: 1.0` for flash/turbo/multilingual/v3, checked live). Don't tell users a model is cheaper; the real tradeoff is latency vs quality, and the per-request caps differ a lot (40k / 40k / 10k / 5k).
 - **`inJustDecodeBounds` returns null on purpose.** `BitmapFactory.decodeStream(s, null, opts)` with `inJustDecodeBounds = true` reports through `opts` and returns **null**. So `openInputStream(uri)?.use { decodeStream(…) } ?: return null` fails for *every* image — the elvis tests the decode result, not the stream. This shipped into P4 and made the whole OCR path answer "Couldn't open that image"; only device testing caught it. **Robolectric does not reproduce it** — its BitmapFactory shadow returns a non-null bitmap in bounds-only mode, verified by reintroducing the bug against the test suite (still green). `SharedImageLoaderTest` says so in a comment; don't trust it as a guard.
 - **Kotlin block comments nest**, so a literal `image/*` or `text/*` inside a KDoc opens a comment that never closes ("Unclosed comment", with misleading unresolved-reference errors elsewhere in the file). Write the MIME glob without the star in comments.
 - **Driving share intents from `adb` is not the real flow.** `am start --grant-read-uri-permission` does **not** transfer a MediaStore grant (`SecurityException: has no access to content://media/...`), files `adb push`ed to `/sdcard/Android/data/<pkg>/` are `shell:ext_data_rw` and unreadable by the app, and a second `am start` gets swallowed ("current task has been brought to the front") unless you pass `-f 0x10008000`. What works: `base64 -w0 f.png | adb shell "run-as <pkg> sh -c 'base64 -d > /data/data/<pkg>/files/f.png'"` then a `file://` URI to that path.
