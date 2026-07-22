@@ -1,8 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-    Android 11 and below. The encrypted key is Keystore-bound and useless off this device, so
-    restoring it elsewhere could only produce a confusing undecryptable blob (PLAN §4, privacy).
+    Android 11 and below. Two things never leave this device:
+
+    - the encrypted key, which is Keystore-bound and useless elsewhere, so restoring it could only
+      produce a confusing undecryptable blob (PLAN §4, privacy);
+    - the reading history, which is a record of everything the user has read aloud. It stays on the
+      phone it was made on, in an app whose pitch is that the screenshot never leaves your device.
 -->
 <full-backup-content>
     <exclude domain="sharedpref" path="lector_credentials.xml" />
+    <exclude domain="database" path="lector_history.db" />
 </full-backup-content>

@@ -54,7 +54,7 @@ import io.github.diet103.lector.BuildConfig
 import io.github.diet103.lector.LectorApplication
 import io.github.diet103.lector.MainActivity
 import io.github.diet103.lector.app.AppContainer
-import io.github.diet103.lector.model.SpeakRequest
+import io.github.diet103.lector.history.ReadSource
 import io.github.diet103.lector.model.TtsError
 import io.github.diet103.lector.ocr.TextBlockAssembler
 import io.github.diet103.lector.playback.PlaybackErrorMapper
@@ -139,11 +139,19 @@ class ReadAloudActivity : ComponentActivity() {
                 if (link != null) {
                     Stage.Busy("Fetching the page…", link = link)
                 } else {
-                    Stage.Speak(extraction.text, extraction.truncated)
+                    Stage.Speak(extraction.text, extraction.truncated, selectionOrShare())
                 }
             }
         }
     }
+
+    /** The selection toolbar and the share sheet are worth telling apart in the history list. */
+    private fun selectionOrShare(): ReadSource =
+        if (intent.action == Intent.ACTION_PROCESS_TEXT) {
+            ReadSource.SELECTION
+        } else {
+            ReadSource.SHARED_TEXT
+        }
 
     /** Holds the selection across the setup detour so the user doesn't have to find it again. */
     private fun notSetUp(container: AppContainer, pending: String?): Stage {
@@ -159,7 +167,15 @@ private sealed interface Stage {
     data class Busy(val message: String, val link: String? = null) : Stage
 
     /** Text in hand — hand it to the playback service. */
-    data class Speak(val text: String, val truncated: Boolean) : Stage
+    data class Speak(
+        val text: String,
+        val truncated: Boolean,
+        val source: ReadSource,
+        /** A fetched page's headline; null for every other path. */
+        val title: String? = null,
+        /** The page a link read came from. Never set for an image — the URI is not kept. */
+        val sourceUrl: String? = null
+    ) : Stage
 
     /** Terminal; the scrim becomes tap-to-dismiss. */
     data class Failed(val message: String, val offerSetup: Boolean = false) : Stage
@@ -182,7 +198,13 @@ private suspend fun readLink(url: String, container: AppContainer): Stage {
                 Log.d(OCR_TAG, "link: extracted=${article.text.length} chars titled=${article.title != null}")
             }
             val capped = SentenceCap.apply(body, container.maxChars)
-            Stage.Speak(capped.text, capped.truncated)
+            Stage.Speak(
+                text = capped.text,
+                truncated = capped.truncated,
+                source = ReadSource.LINK,
+                title = article.title,
+                sourceUrl = url
+            )
         }
     }
 }
@@ -330,7 +352,12 @@ private fun SpeakHandoff(
             }
             controller = connected
             connected.addListener(listener)
-            val uri = container.registry.register(container.speakRequest(speak.text))
+            val uri = container.beginRead(
+                text = speak.text,
+                source = speak.source,
+                title = speak.title,
+                sourceUrl = speak.sourceUrl
+            )
             connected.setMediaItem(MediaItem.Builder().setMediaId(uri.lastPathSegment!!).build())
             connected.prepare()
             connected.play()
@@ -393,7 +420,9 @@ private suspend fun readScreen(context: Context, uri: Uri, container: AppContain
     if (text.isBlank()) return Stage.Failed("No text found in that image.")
 
     val capped = SentenceCap.apply(text, container.maxChars)
-    return Stage.Speak(capped.text, capped.truncated)
+    // Recognized text only. The bitmap is already recycled and the content:// URI is deliberately
+    // not carried through — a history of what you read must never become a folder of screenshots.
+    return Stage.Speak(capped.text, capped.truncated, ReadSource.SCREENSHOT)
 }
 
 /**

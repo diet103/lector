@@ -46,6 +46,23 @@ class SettingsRepository(private val prefs: SharedPreferences) {
     val deleteScreenshotAfterReading: StateFlow<Boolean> =
         _deleteScreenshotAfterReading.asStateFlow()
 
+    /**
+     * Keep a list of what's been read. **On by default**, which reverses PLAN §4's "selected text
+     * is never persisted" — so it is paired with [historyNoticeSeen] below, and the history is
+     * backup-excluded, one-tap clearable, and never holds a screenshot image.
+     */
+    private val _historyEnabled = MutableStateFlow(prefs.getBoolean(KEY_HISTORY_ENABLED, true))
+    val historyEnabled: StateFlow<Boolean> = _historyEnabled.asStateFlow()
+
+    /**
+     * Whether the user has been told history exists. Defaults false, including for someone
+     * upgrading from a version that never stored anything — silently starting to keep a record of
+     * everything they read would be a change made behind their back.
+     */
+    private val _historyNoticeSeen =
+        MutableStateFlow(prefs.getBoolean(KEY_HISTORY_NOTICE_SEEN, false))
+    val historyNoticeSeen: StateFlow<Boolean> = _historyNoticeSeen.asStateFlow()
+
     fun setVoiceId(voiceId: String) {
         prefs.edit().putString(KEY_VOICE_ID, voiceId).apply()
         _voiceId.value = voiceId
@@ -80,6 +97,16 @@ class SettingsRepository(private val prefs: SharedPreferences) {
         _deleteScreenshotAfterReading.value = enabled
     }
 
+    fun setHistoryEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_HISTORY_ENABLED, enabled).apply()
+        _historyEnabled.value = enabled
+    }
+
+    fun markHistoryNoticeSeen() {
+        prefs.edit().putBoolean(KEY_HISTORY_NOTICE_SEEN, true).apply()
+        _historyNoticeSeen.value = true
+    }
+
     fun clear() {
         prefs.edit().clear().apply()
         _voiceId.value = null
@@ -88,6 +115,9 @@ class SettingsRepository(private val prefs: SharedPreferences) {
         _speed.value = DEFAULT_SPEED
         _maxChars.value = DEFAULT_MAX_CHARS
         _deleteScreenshotAfterReading.value = false
+        _historyEnabled.value = true
+        // Signing out and back in should re-explain history rather than assume it's remembered.
+        _historyNoticeSeen.value = false
     }
 
     private fun clampCap(requested: Int, model: TtsModel): Int =
@@ -109,5 +139,7 @@ class SettingsRepository(private val prefs: SharedPreferences) {
         private const val KEY_SPEED = "speed"
         private const val KEY_MAX_CHARS = "max_chars"
         private const val KEY_DELETE_SCREENSHOT = "delete_screenshot_after_reading"
+        private const val KEY_HISTORY_ENABLED = "history_enabled"
+        private const val KEY_HISTORY_NOTICE_SEEN = "history_notice_seen"
     }
 }

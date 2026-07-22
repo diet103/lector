@@ -93,10 +93,16 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** Clears the key and every setting; the ElevenLabs account itself is untouched. */
+    /**
+     * Clears the key, every setting, and the reading history; the ElevenLabs account itself is
+     * untouched. History goes too because signing out is the gesture people use when handing a
+     * phone on — leaving behind a list of everything they'd read would be a nasty surprise.
+     * The audio cache is left alone: it's OS-purgeable and cleared separately in Settings.
+     */
     private fun signOut(container: io.github.diet103.lector.app.AppContainer) {
         container.apiKeyStore.clear()
         container.settings.clear()
         container.lastError.clear()
+        container.history.clearAll()
     }
 }

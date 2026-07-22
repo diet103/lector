@@ -1,13 +1,18 @@
 package io.github.diet103.lector.app
 
 import android.content.Context
+import android.net.Uri
 import androidx.media3.datasource.cache.Cache
 import io.github.diet103.lector.BuildConfig
 import io.github.diet103.lector.data.ApiKeyStore
 import io.github.diet103.lector.data.KeystoreAesGcmCipher
 import io.github.diet103.lector.data.LastErrorRepository
+import io.github.diet103.lector.data.ReadContext
 import io.github.diet103.lector.data.SettingsRepository
 import io.github.diet103.lector.data.SpeakRequestRegistry
+import io.github.diet103.lector.history.HistoryEntry
+import io.github.diet103.lector.history.HistoryStore
+import io.github.diet103.lector.history.ReadSource
 import io.github.diet103.lector.model.SpeakRequest
 import io.github.diet103.lector.ocr.ScreenTextRecognizer
 import io.github.diet103.lector.playback.TtsCache
@@ -40,6 +45,12 @@ class AppContainer(context: Context) {
     val lastError = LastErrorRepository()
 
     /**
+     * Lazy: a share that only ever speaks and finishes shouldn't pay to open a database, and the
+     * playback service process touches it only when a read actually starts.
+     */
+    val history: HistoryStore by lazy { HistoryStore(appContext) }
+
+    /**
      * The encrypted store is the only source of truth — no BuildConfig fallback, so onboarding is
      * exercised on debug builds exactly as a real user meets it.
      */
@@ -69,6 +80,42 @@ class AppContainer(context: Context) {
         modelId = settings.model.value.id,
         outputFormat = settings.format.value.id
     )
+
+    /**
+     * Starts a read: builds the request, remembers where it came from, and returns the
+     * `lector://tts/<key>` URI to hand the player. Every entry point goes through here, which is
+     * what keeps the history honest about its own sources.
+     *
+     * Nothing is written to disk yet — [PlaybackService][io.github.diet103.lector.playback.PlaybackService]
+     * records the row only once audio actually starts, so a read that dies on a bad key never
+     * shows up as something you read.
+     */
+    fun beginRead(
+        text: String,
+        source: ReadSource,
+        title: String? = null,
+        sourceUrl: String? = null
+    ): Uri = registry.register(
+        speakRequest(text),
+        ReadContext(source = source, title = title, sourceUrl = sourceUrl)
+    )
+
+    /**
+     * Re-registers a stored read so it can be replayed. The registry is memory-only, so without
+     * this a cached read becomes unplayable the moment the process dies — history is what gives it
+     * somewhere to come back from. No [ReadContext]: the row already exists and only its
+     * `lastReadAt` moves.
+     */
+    fun replay(entry: HistoryEntry): Uri = registry.register(entry.toSpeakRequest())
+
+    /**
+     * Whether replaying this costs nothing — i.e. every byte is already on disk. Used to label
+     * history entries honestly, and to decide whether seeking may be offered at all.
+     */
+    fun isFullyCached(entry: HistoryEntry): Boolean {
+        val bytes = entry.audioBytes ?: return false
+        return cache.getCachedBytes(entry.key, 0, Long.MAX_VALUE) >= bytes
+    }
 
     /** The active truncation cap (PLAN §2), overridable in settings and bounded by the model. */
     val maxChars: Int get() = settings.maxChars.value

@@ -4,12 +4,16 @@ import android.app.PendingIntent
 import android.content.Intent
 import android.os.Handler
 import android.os.Looper
+import androidx.media3.common.C
+import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import io.github.diet103.lector.LectorApplication
 import io.github.diet103.lector.MainActivity
+import io.github.diet103.lector.history.HistoryEntry
+import io.github.diet103.lector.history.ReadSource
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -66,10 +70,82 @@ class PlaybackService : MediaSessionService() {
             .setSessionActivity(sessionActivity)
             .build()
 
+        player.addListener(HistoryRecorder(container))
+
         // Speed is applied by the player, never by the API — so dragging the slider re-pitches
         // what's already playing and cannot re-synthesise or re-bill (PLAN §6 P6).
         serviceScope.launch {
             container.settings.speed.collect { player.setPlaybackSpeed(it) }
+        }
+    }
+
+    /**
+     * Writes the reading history (v0.2).
+     *
+     * Recording happens on the first `isPlaying`, not when the read is requested: a read that dies
+     * on a bad key or a dead network never becomes something the user "read". The duration and
+     * byte count only exist once playback ends, so they arrive in a second write — an abandoned
+     * read still gets a row, just without them, and honestly reads as not-free-to-replay.
+     */
+    private inner class HistoryRecorder(
+        private val container: io.github.diet103.lector.app.AppContainer
+    ) : Player.Listener {
+
+        /** Guards against re-recording the same item on every pause/resume within one read. */
+        private var recordedKey: String? = null
+
+        /** A new item is a new read, even if it's the same text being replayed. */
+        override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            recordedKey = null
+        }
+
+        override fun onIsPlayingChanged(isPlaying: Boolean) {
+            if (!isPlaying) return
+            val key = player.currentMediaItem?.mediaId ?: return
+            if (key == recordedKey || !container.settings.historyEnabled.value) return
+
+            val request = container.registry.byKey(key) ?: return
+            val context = container.registry.contextFor(key)
+            recordedKey = key
+            val now = System.currentTimeMillis()
+
+            serviceScope.launch(Dispatchers.IO) {
+                // A replay carries no ReadContext, and inventing one would relabel a screenshot
+                // read as shared text. If the row already exists, only its position in the list
+                // should move.
+                if (context == null && container.history.touch(key, now)) return@launch
+
+                container.history.record(
+                    HistoryEntry(
+                        key = key,
+                        text = request.text,
+                        title = context?.title,
+                        source = context?.source ?: ReadSource.SHARED_TEXT,
+                        sourceUrl = context?.sourceUrl,
+                        voiceId = request.voiceId,
+                        modelId = request.modelId,
+                        outputFormat = request.outputFormat,
+                        createdAt = now,
+                        lastReadAt = now,
+                        durationMs = null,
+                        audioBytes = null
+                    )
+                )
+            }
+        }
+
+        override fun onPlaybackStateChanged(playbackState: Int) {
+            if (playbackState != Player.STATE_ENDED) return
+            val key = recordedKey ?: return
+            val duration = player.duration
+            if (duration == C.TIME_UNSET) return
+
+            serviceScope.launch(Dispatchers.IO) {
+                // Contiguous bytes from the start — what CacheDataSource actually holds, and the
+                // same question `isFullyCached` asks later.
+                val cached = container.cache.getCachedBytes(key, 0, Long.MAX_VALUE)
+                if (cached > 0) container.history.markCompleted(key, duration, cached)
+            }
         }
     }
 

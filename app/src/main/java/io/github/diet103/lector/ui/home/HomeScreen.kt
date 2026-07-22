@@ -38,8 +38,7 @@ import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.MoreExecutors
 import io.github.diet103.lector.app.AppContainer
-import io.github.diet103.lector.model.SpeakRequest
-import io.github.diet103.lector.model.TtsError
+import io.github.diet103.lector.history.ReadSource
 import io.github.diet103.lector.model.UserAccount
 import io.github.diet103.lector.playback.PlaybackService
 import io.github.diet103.lector.tts.ApiResult
@@ -168,7 +167,7 @@ fun HomeScreen(
                 onSpeak = {
                     val active = controller ?: return@MiniPlayer
                     container.lastError.clear()
-                    val uri = container.registry.register(container.speakRequest(text.trim()))
+                    val uri = container.beginRead(text.trim(), ReadSource.TRY_IT)
                     active.setMediaItem(MediaItem.Builder().setMediaId(uri.lastPathSegment!!).build())
                     active.prepare()
                     active.play()
