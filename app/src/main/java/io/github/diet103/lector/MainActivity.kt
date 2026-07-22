@@ -14,15 +14,18 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import io.github.diet103.lector.history.HistoryEntry
 import io.github.diet103.lector.ui.about.AboutScreen
+import io.github.diet103.lector.ui.history.HistoryScreen
+import io.github.diet103.lector.ui.history.ReaderScreen
 import io.github.diet103.lector.ui.home.HomeScreen
 import io.github.diet103.lector.ui.onboarding.OnboardingScreen
 import io.github.diet103.lector.ui.settings.SettingsScreen
 import io.github.diet103.lector.ui.theme.LectorTheme
 import io.github.diet103.lector.ui.voices.VoicePickerScreen
 
-/** Where the single activity currently is. A plain enum: four destinations don't earn a nav library. */
-private enum class Screen { Home, Settings, Voices, About }
+/** Where the single activity currently is. A plain enum: six destinations don't earn a nav library. */
+private enum class Screen { Home, Settings, Voices, About, History, Reader }
 
 /**
  * Onboarding until there's a usable key and voice, then Home. The notification permission is
@@ -39,11 +42,17 @@ class MainActivity : ComponentActivity() {
             LectorTheme {
                 var setUp by remember { mutableStateOf(container.isSetUp) }
                 var screen by rememberSaveable { mutableStateOf(Screen.Home) }
+                // Which stored read the reader is showing, and where it was opened from — the
+                // reader is reachable from both Home and the history list, and back should go
+                // wherever you came from.
+                var reading by remember { mutableStateOf<HistoryEntry?>(null) }
+                var readerCameFrom by rememberSaveable { mutableStateOf(Screen.Home) }
 
                 // Back out of a sub-screen rather than leaving the app.
                 BackHandler(enabled = setUp && screen != Screen.Home) {
                     screen = when (screen) {
                         Screen.Voices, Screen.About -> Screen.Settings
+                        Screen.Reader -> readerCameFrom
                         else -> Screen.Home
                     }
                 }
@@ -60,13 +69,43 @@ class MainActivity : ComponentActivity() {
                         return@Scaffold
                     }
 
+                    fun openReader(entry: HistoryEntry, from: Screen) {
+                        reading = entry
+                        readerCameFrom = from
+                        screen = Screen.Reader
+                    }
+
                     when (screen) {
                         Screen.Home -> HomeScreen(
                             container = container,
                             onChangeKey = { signOut(container); setUp = false },
                             onOpenSettings = { screen = Screen.Settings },
+                            onOpenHistory = { screen = Screen.History },
+                            onOpenRead = { openReader(it, Screen.Home) },
                             modifier = content
                         )
+
+                        Screen.History -> HistoryScreen(
+                            container = container,
+                            onOpen = { openReader(it, Screen.History) },
+                            onDone = { screen = Screen.Home },
+                            modifier = content
+                        )
+
+                        Screen.Reader -> {
+                            val entry = reading
+                            // Deleting the read you were looking at leaves nothing to show.
+                            if (entry == null) {
+                                screen = readerCameFrom
+                            } else {
+                                ReaderScreen(
+                                    container = container,
+                                    entry = entry,
+                                    onDone = { screen = readerCameFrom },
+                                    modifier = content
+                                )
+                            }
+                        }
 
                         Screen.Settings -> SettingsScreen(
                             container = container,

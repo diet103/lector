@@ -22,6 +22,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -64,6 +65,14 @@ fun SettingsScreen(
     val speed by settings.speed.collectAsState()
     val maxChars by settings.maxChars.collectAsState()
     val deleteScreenshots by settings.deleteScreenshotAfterReading.collectAsState()
+    val historyEnabled by settings.historyEnabled.collectAsState()
+    val historyRevision by container.history.revision.collectAsState()
+    var historyCount by remember { mutableStateOf(0) }
+    var confirmClearHistory by remember { mutableStateOf(false) }
+
+    LaunchedEffect(historyRevision) {
+        historyCount = withContext(Dispatchers.IO) { container.history.count() }
+    }
 
     var confirmSignOut by remember { mutableStateOf(false) }
     var cacheNotice by remember { mutableStateOf<String?>(null) }
@@ -162,6 +171,36 @@ fun SettingsScreen(
                 }
             }
 
+            SectionTitle("History")
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Keep a reading history", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "Saves what you have Lector read so you can find it again. Stored only on " +
+                            "this phone and never backed up. Screenshots are never saved — only " +
+                            "the text read out of them.",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+                Switch(
+                    checked = historyEnabled,
+                    onCheckedChange = { settings.setHistoryEnabled(it) }
+                )
+            }
+            OutlinedButton(
+                onClick = { confirmClearHistory = true },
+                enabled = historyCount > 0,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    if (historyCount > 0) "Clear history ($historyCount)" else "History is empty"
+                )
+            }
+
             SectionTitle("Storage")
             Text(
                 "Audio you've already heard is kept on this phone so replaying it is free.",
@@ -196,14 +235,39 @@ fun SettingsScreen(
         }
     }
 
+    if (confirmClearHistory) {
+        AlertDialog(
+            onDismissRequest = { confirmClearHistory = false },
+            title = { Text("Clear reading history?") },
+            text = {
+                Text(
+                    "Removes all $historyCount saved reads. The audio itself stays cached, so " +
+                        "anything you read again soon is still free."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    scope.launch {
+                        withContext(Dispatchers.IO) { container.history.clearAll() }
+                        confirmClearHistory = false
+                    }
+                }) { Text("Clear") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmClearHistory = false }) { Text("Cancel") }
+            }
+        )
+    }
+
     if (confirmSignOut) {
         AlertDialog(
             onDismissRequest = { confirmSignOut = false },
             title = { Text("Sign out?") },
             text = {
                 Text(
-                    "Your API key is deleted from this phone and your settings are reset. Your " +
-                        "ElevenLabs account isn't touched — you can paste the same key back in."
+                    "Your API key is deleted from this phone, your settings are reset, and your " +
+                        "reading history is cleared. Your ElevenLabs account isn't touched — you " +
+                        "can paste the same key back in."
                 )
             },
             confirmButton = {

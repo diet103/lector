@@ -19,6 +19,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * The foreground media service (PLAN §6 P2). Owns the single [ExoPlayer] and one [MediaSession];
@@ -32,6 +33,7 @@ class PlaybackService : MediaSessionService() {
 
     private var mediaSession: MediaSession? = null
     private lateinit var player: ExoPlayer
+    private lateinit var sessionCallback: TtsSessionCallback
 
     private val idleHandler = Handler(Looper.getMainLooper())
     private val idleStop = Runnable { stopSelf() }
@@ -65,10 +67,13 @@ class PlaybackService : MediaSessionService() {
             PendingIntent.FLAG_IMMUTABLE
         )
 
+        sessionCallback = TtsSessionCallback(container.registry)
         mediaSession = MediaSession.Builder(this, player)
-            .setCallback(TtsSessionCallback(container.registry))
+            .setCallback(sessionCallback)
             .setSessionActivity(sessionActivity)
             .build()
+
+        player.addListener(SeekAvailability(container))
 
         player.addListener(HistoryRecorder(container))
 
@@ -76,6 +81,60 @@ class PlaybackService : MediaSessionService() {
         // what's already playing and cannot re-synthesise or re-bill (PLAN §6 P6).
         serviceScope.launch {
             container.settings.speed.collect { player.setPlaybackSpeed(it) }
+        }
+    }
+
+    /**
+     * Decides, per read, whether seeking is allowed at all (v0.2 reader).
+     *
+     * Seeking is stripped from the session by default because ElevenLabs ignores `Range`: a scrub
+     * mid-stream would re-download from byte zero, bill the whole text again, and splice a
+     * different generation. But a read whose bytes are *entirely on disk* is served by the cache,
+     * so seeking inside it costs nothing — which is what makes the reader's tap-a-word possible.
+     *
+     * Cache state is the only signal used. Deliberately not the player's own `duration` or
+     * `isCurrentMediaItemSeekable`: those come from the constant-bitrate estimate and were never
+     * verified for a partially-downloaded read (see TtsStreamingBillingTest). And
+     * [GuardedUpstreamDataSource] remains the net underneath — if a seek ever slips through on an
+     * uncached read it fails loudly rather than quietly costing money.
+     */
+    private inner class SeekAvailability(
+        private val container: io.github.diet103.lector.app.AppContainer
+    ) : Player.Listener {
+
+        override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            val key = mediaItem?.mediaId
+            if (key == null) {
+                applySeek(false)
+                return
+            }
+            // Deny first: a transition must never leave the previous read's grant in place.
+            applySeek(false)
+            serviceScope.launch {
+                val cached = withContext(Dispatchers.IO) {
+                    container.history.byKey(key)?.let(container::isFullyCached) == true
+                }
+                if (cached && player.currentMediaItem?.mediaId == key) applySeek(true)
+            }
+        }
+
+        private fun applySeek(allowed: Boolean) {
+            val session = mediaSession ?: return
+            val commands = if (allowed) {
+                sessionCallback.cachedSeekPlayerCommands
+            } else {
+                sessionCallback.availablePlayerCommands
+            }
+            session.connectedControllers.forEach { controller ->
+                // The notification keeps a constant set of controls either way — a scrubber that
+                // appears only for cached reads would be worse than none.
+                if (session.isMediaNotificationController(controller)) return@forEach
+                session.setAvailableCommands(
+                    controller,
+                    MediaSession.ConnectionResult.DEFAULT_SESSION_COMMANDS,
+                    commands
+                )
+            }
         }
     }
 

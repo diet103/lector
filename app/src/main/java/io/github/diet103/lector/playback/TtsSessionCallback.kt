@@ -40,6 +40,26 @@ class TtsSessionCallback(
         )
         .build()
 
+    /**
+     * The above, plus seeking *within the current item only* — granted by
+     * [PlaybackService][io.github.diet103.lector.playback.PlaybackService] to in-app controllers
+     * when every byte of the current read is already on disk, so the reader's tap-a-word can
+     * actually move the playhead.
+     *
+     * Still no track-to-track seeking, and still nothing granted to the media notification: the
+     * shade's controls stay identical whether or not a read happens to be cached, rather than
+     * growing a scrubber that sometimes costs money and sometimes doesn't.
+     */
+    val cachedSeekPlayerCommands: Player.Commands = Player.Commands.Builder()
+        .addAll(availablePlayerCommands)
+        .addAll(
+            Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM,
+            Player.COMMAND_SEEK_TO_DEFAULT_POSITION,
+            Player.COMMAND_SEEK_BACK,
+            Player.COMMAND_SEEK_FORWARD
+        )
+        .build()
+
     override fun onConnect(
         session: MediaSession,
         controller: MediaSession.ControllerInfo
