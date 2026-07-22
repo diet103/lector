@@ -44,12 +44,32 @@ jobs:
       - name: Restore the signing keystore
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
         run: |
           if [ -z "$KEYSTORE_BASE64" ]; then
             echo "::error::KEYSTORE_BASE64 is not set — the release would be unsigned."
             exit 1
           fi
-          echo "$KEYSTORE_BASE64" | base64 -d > lector-release.jks
+          # The secret is pasted by a human, so it arrives however their clipboard left it. Strip
+          # newlines, carriage returns and stray whitespace rather than failing on them — a CR from
+          # a Windows copy is not a reason to refuse to cut a release.
+          printf '%s' "$KEYSTORE_BASE64" | tr -d '\r\n\t ' | base64 -d > lector-release.jks || {
+            echo "::error::KEYSTORE_BASE64 is not valid base64. Regenerate with: base64 -w0 lector-release.jks"
+            exit 1
+          }
+          if [ ! -s lector-release.jks ]; then
+            echo "::error::KEYSTORE_BASE64 decoded to an empty file."
+            exit 1
+          fi
+          # Prove the keystore, password and alias actually agree before spending a build on them.
+          # Otherwise the first sign of a wrong password is a signing failure several minutes in.
+          if ! keytool -list -keystore lector-release.jks \
+                 -storepass "$KEYSTORE_PASSWORD" -alias "$KEY_ALIAS" > /dev/null 2>&1; then
+            echo "::error::The keystore decoded, but KEYSTORE_PASSWORD/KEY_ALIAS do not open it."
+            exit 1
+          fi
+          echo "keystore restored and verified ($(stat -c%s lector-release.jks) bytes)"
 
       - name: Build, lint, test, and sign
         env:
