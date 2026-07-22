@@ -1,6 +1,7 @@
 package io.github.diet103.lector.playback
 
 import android.content.Context
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.database.StandaloneDatabaseProvider
@@ -25,6 +26,7 @@ import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -57,6 +59,9 @@ class TtsStreamingBillingTest {
 
     private val audio = TestMp3.bytes()
     private val request = SpeakRequest(text = "One utterance, one POST.", voiceId = "voice123")
+
+    /** 40 frames x 1152 samples per frame / 44100 Hz, in milliseconds. */
+    private val EXPECTED_DURATION_MS = 40 * 1152 * 1000.0 / 44100.0
 
     private lateinit var server: MockWebServer
     private lateinit var cache: SimpleCache
@@ -228,6 +233,61 @@ class TtsStreamingBillingTest {
         assertTrue(states.contains(Player.STATE_READY))
         assertEquals(Player.STATE_ENDED, states.last())
     }
+
+    // ⑧ v0.2 reader: a fully cached read reports an *accurate* duration. Asserting merely
+    // "not TIME_UNSET" would pass on a garbage value, and the reader maps character offsets onto
+    // this number — a wrong duration means every highlight and every tap-to-seek is wrong.
+    @Test
+    fun `a fully cached read exposes an accurate duration`() {
+        server.enqueue(mp3Response())
+        speak(request)
+        runUntilEnded()
+
+        speak(request)
+        TestPlayerRunHelper.runUntilPlaybackState(player, Player.STATE_READY)
+
+        assertNotEquals(
+            "duration is TIME_UNSET on a cached CBR MP3 — the reader cannot map words to time",
+            C.TIME_UNSET,
+            player.duration
+        )
+        // 40 frames x 1152 samples / 44100 Hz = 1044.9 ms. Media3 derives this from the stream
+        // length and the constant bitrate; a few ms of slack covers frame-boundary rounding.
+        assertEquals(EXPECTED_DURATION_MS, player.duration.toDouble(), 30.0)
+    }
+
+    // ⑨ v0.2 reader: seeking within a fully cached read is served from disk. This is the whole
+    // basis for tap-a-word-to-seek: seeks are stripped everywhere else because ElevenLabs ignores
+    // Range and would re-bill, but cached bytes cost nothing. Asserts the seek actually *landed*,
+    // not just that nothing exploded — a no-op seek would pass a request-count-only check.
+    //
+    // Note what this suite deliberately does NOT assert: how `duration` or
+    // `isCurrentMediaItemSeekable` behave *mid-stream*. The auto-advancing FakeClock races through
+    // `throttleBody`, so the body is always fully cached before STATE_READY and there is no
+    // observable in-flight state here. Seeking is therefore granted on cache state alone — never
+    // on the player's own seekability, which was never verified for a partial read.
+    @Test
+    fun `seeking inside a fully cached read lands, and issues no new request`() {
+        server.enqueue(mp3Response())
+        server.enqueue(MockResponse().setResponseCode(500).setBody("a seek must never re-POST"))
+
+        speak(request)
+        runUntilEnded()
+        assertEquals(1, server.requestCount)
+
+        speak(request)
+        TestPlayerRunHelper.runUntilPlaybackState(player, Player.STATE_READY)
+        val target = player.duration / 2
+        player.seekTo(target)
+        TestPlayerRunHelper.runUntilPendingCommandsAreFullyHandled(player)
+
+        assertEquals(target.toDouble(), player.currentPosition.toDouble(), 60.0)
+        runUntilEnded()
+
+        assertNull(player.playerError)
+        assertEquals(1, server.requestCount)
+    }
+
 
     private fun mp3Response(body: ByteArray = audio): MockResponse =
         MockResponse()
