@@ -25,9 +25,78 @@ Grab an APK from the [latest release](https://github.com/diet103/lector/releases
 
 Android refuses to install an APK built for the wrong CPU, so a wrong guess fails harmlessly at
 install time. You will need to allow installing from your browser or file manager the first time.
-Verify the download against the `SHA256SUMS.txt` published with each release.
 
-Requires Android 8.0 or newer.
+Requires Android 8.0 or newer. Every release is signed, and releases from v0.1.1 onward also carry
+a build attestation — see [Verify this build](#verify-this-build).
+
+## What Lector is allowed to do on your phone
+
+Installing an APK from the internet deserves suspicion. The fastest way to check this one is the
+permission list, which Android enforces whatever the code claims — you can read it yourself in
+[AndroidManifest.xml](app/src/main/AndroidManifest.xml), or in any APK inspector before installing.
+
+| Permission | Why |
+| --- | --- |
+| `INTERNET` | Send your text to ElevenLabs and stream the audio back |
+| `FOREGROUND_SERVICE` + `FOREGROUND_SERVICE_MEDIA_PLAYBACK` | Keep playing when you leave the app, with the usual media notification |
+| `POST_NOTIFICATIONS` | Show that notification |
+| `WAKE_LOCK` | Finish reading after the screen turns off |
+
+That is the whole list. In particular there is **no storage, camera, microphone, location, contacts,
+or accounts permission** — an app that wanted to watch you would need permissions Lector never asks
+for, and Android would have to show you. Shared screenshots arrive as one-shot `content://` grants
+for that single image, which is why reading text out of pictures needs no storage access at all.
+
+The only host Lector connects to is `api.elevenlabs.io`, plus any page you explicitly share to it.
+There is no analytics SDK, no crash reporter, and no ads.
+
+## Verify this build
+
+Four checks, cheapest first. All of them work on the files attached to any
+[release](https://github.com/diet103/lector/releases).
+
+**1. The file is the one that was published**
+
+```bash
+sha256sum -c SHA256SUMS.txt
+```
+
+**2. It was signed with the key every Lector release uses**
+
+```bash
+apksigner verify --print-certs app-arm64-v8a-release.apk
+```
+
+The certificate SHA-256 should be:
+
+```
+f2ff13f1622120e2f139f4d471d9eb1d9ae0e27b1b3ed55c7fca10b79c0c0603
+```
+
+The same fingerprint on every release is what tells you an update came from the same person as the
+build you already trusted. Android enforces this too — it refuses to install an update signed with a
+different key.
+
+**3. It was built by GitHub from this source, not on someone's laptop**
+
+```bash
+gh attestation verify app-arm64-v8a-release.apk --repo diet103/lector
+```
+
+Release APKs from **v0.1.1 onward** carry a signed [build attestation](https://docs.github.com/actions/security-guides/using-artifact-attestations-to-establish-provenance-for-builds)
+recorded in a public transparency log, binding the file's digest to the exact commit and workflow
+run that produced it. This is the check a checksum can't give you: a checksum published next to the
+file only proves the file matches the page. (v0.1.0 predates this and has no attestation — checks 1
+and 2 still apply to it.)
+
+**4. Watch it yourself**
+
+Point the phone at any proxy and use it. You will see requests to `api.elevenlabs.io` and to pages
+you shared, and nothing else.
+
+**One honest caveat:** Android builds are not bit-for-bit reproducible — build the same commit twice
+and you get two different files — so "build it yourself and compare hashes" does not work here, for
+this or any other Android app. Attestation exists precisely because that check is unavailable.
 
 ## Setup
 
