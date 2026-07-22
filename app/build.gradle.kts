@@ -36,13 +36,13 @@ android {
         applicationId = "io.github.diet103.lector"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
 
         buildConfigField("String", "DEV_ELEVEN_KEY", "\"\"")
     }
 
-    // Every split shares versionCode 1 on purpose. Distinct per-ABI codes only matter to Play's
+    // Every split shares one versionCode on purpose. Distinct per-ABI codes only matter to Play's
     // multi-APK resolution; for sideloading they would turn switching from the universal APK to a
     // per-ABI one into a blocked "downgrade". Revisit if Lector ever ships on Play.
     splits {
