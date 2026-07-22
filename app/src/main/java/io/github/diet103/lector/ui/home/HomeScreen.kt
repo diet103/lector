@@ -1,6 +1,16 @@
 package io.github.diet103.lector.ui.home
 
+import android.Manifest
+import android.app.Activity
 import android.content.ComponentName
+import android.content.Context
+import android.content.ContextWrapper
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
+import android.provider.Settings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -31,6 +41,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
@@ -126,6 +140,8 @@ fun HomeScreen(
 
             AccountStatus(account = account, error = accountError)
 
+            NotificationNudge()
+
             lastError?.let { error ->
                 Spacer(Modifier.size(4.dp))
                 Text(
@@ -179,6 +195,89 @@ fun HomeScreen(
             TextButton(onClick = onOpenSettings) { Text("Settings") }
         }
     }
+}
+
+/**
+ * Shown only while notifications are denied.
+ *
+ * This is a quiet failure worth surfacing: without the permission the foreground service still runs
+ * and audio still plays perfectly, so nothing looks broken — the media notification simply never
+ * appears, and the only way to stop playback is to come back into the app. It is entirely possible
+ * to use Lector for weeks without realising that is why. Onboarding offers the permission, but
+ * skipping it there left no second chance.
+ */
+@Composable
+private fun NotificationNudge() {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+
+    val context = LocalContext.current
+    val activity = remember(context) { context.findActivity() }
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    fun isGranted() = ContextCompat.checkSelfPermission(
+        context,
+        Manifest.permission.POST_NOTIFICATIONS
+    ) == PackageManager.PERMISSION_GRANTED
+
+    var granted by remember { mutableStateOf(isGranted()) }
+    var dismissed by rememberSaveable { mutableStateOf(false) }
+    // Android stops offering the dialog after enough refusals; from then on only Settings can fix
+    // it. There is no way to tell that state apart from "never asked" up front, so we learn it from
+    // a request that returns denied without the system having offered a rationale.
+    var settingsOnly by rememberSaveable { mutableStateOf(false) }
+
+    val launcher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { allowed ->
+        granted = allowed
+        settingsOnly = !allowed && activity?.shouldShowRequestPermissionRationale(
+            Manifest.permission.POST_NOTIFICATIONS
+        ) == false
+    }
+
+    // Re-check on resume so the card disappears after the permission is granted from system
+    // Settings, where no result ever comes back to us.
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) granted = isGranted()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    if (granted || dismissed) return
+
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text("Playback controls are hidden", style = MaterialTheme.typography.titleMedium)
+        Text(
+            "Notifications are off, so Lector can't show its play/pause notification. Reading " +
+                "still works — you just have to come back here to stop it.",
+            style = MaterialTheme.typography.bodySmall
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = {
+                if (settingsOnly) {
+                    runCatching {
+                        context.startActivity(
+                            Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                                .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                        )
+                    }
+                } else {
+                    launcher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                }
+            }) {
+                Text(if (settingsOnly) "Open notification settings" else "Turn on notifications")
+            }
+            TextButton(onClick = { dismissed = true }) { Text("Not now") }
+        }
+    }
+}
+
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
 }
 
 @Composable
