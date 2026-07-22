@@ -103,7 +103,7 @@ class ReadAloudActivity : ComponentActivity() {
             return if (container.isSetUp) Stage.Reading else notSetUp(container, null)
         }
 
-        return when (val extraction = IntentTextExtractor.extract(intent)) {
+        return when (val extraction = IntentTextExtractor.extract(intent, container.maxChars)) {
             is TextExtraction.Failed -> Stage.Failed(
                 when (extraction.reason) {
                     ExtractionError.EMPTY -> "No text to read."
@@ -266,9 +266,7 @@ private fun SpeakHandoff(
             }
             controller = connected
             connected.addListener(listener)
-            val uri = container.registry.register(
-                SpeakRequest(text = speak.text, voiceId = container.currentVoiceId.orEmpty())
-            )
+            val uri = container.registry.register(container.speakRequest(speak.text))
             connected.setMediaItem(MediaItem.Builder().setMediaId(uri.lastPathSegment!!).build())
             connected.prepare()
             connected.play()
@@ -312,7 +310,7 @@ private suspend fun readScreen(context: Context, uri: Uri, container: AppContain
     }
     if (text.isBlank()) return Stage.Failed("No text found in that image.")
 
-    val capped = SentenceCap.apply(text, IntentTextExtractor.DEFAULT_MAX_CHARS)
+    val capped = SentenceCap.apply(text, container.maxChars)
     return Stage.Speak(capped.text, capped.truncated)
 }
 

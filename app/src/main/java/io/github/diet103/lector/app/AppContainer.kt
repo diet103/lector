@@ -8,6 +8,7 @@ import io.github.diet103.lector.data.KeystoreAesGcmCipher
 import io.github.diet103.lector.data.LastErrorRepository
 import io.github.diet103.lector.data.SettingsRepository
 import io.github.diet103.lector.data.SpeakRequestRegistry
+import io.github.diet103.lector.model.SpeakRequest
 import io.github.diet103.lector.ocr.ScreenTextRecognizer
 import io.github.diet103.lector.playback.TtsCache
 import io.github.diet103.lector.tts.ElevenLabsApi
@@ -57,6 +58,21 @@ class AppContainer(context: Context) {
     var pendingText: String? = null
 
     /**
+     * One place every entry point builds its request, so the selection toolbar, the share sheet,
+     * the screenshot path and the try-it box can't drift apart on voice, model or format.
+     * Speed is deliberately absent: the player applies it, so changing it never re-bills.
+     */
+    fun speakRequest(text: String) = SpeakRequest(
+        text = text,
+        voiceId = currentVoiceId.orEmpty(),
+        modelId = settings.model.value.id,
+        outputFormat = settings.format.value.id
+    )
+
+    /** The active truncation cap (PLAN §2), overridable in settings and bounded by the model. */
+    val maxChars: Int get() = settings.maxChars.value
+
+    /**
      * Counts real upstream requests so the dev screen can still show the billing invariant on
      * the live service (the automated suite is the real fence). Debug builds only — the
      * interceptor is never added in release.
@@ -77,6 +93,17 @@ class AppContainer(context: Context) {
     val elevenLabsApi = ElevenLabsApi(okHttpClient)
 
     val cache: Cache get() = TtsCache.get(appContext)
+
+    /**
+     * Drops every cached MP3. Replays stop being free after this, so it's a user-initiated
+     * action only. @return bytes reclaimed.
+     */
+    fun clearAudioCache(): Long {
+        val store = TtsCache.get(appContext)
+        val before = store.cacheSpace
+        store.keys.toList().forEach { store.removeResource(it) }
+        return before - store.cacheSpace
+    }
 
     /**
      * Lazy so the bundled ML Kit model is only loaded in a process that actually gets a

@@ -2,6 +2,7 @@ package io.github.diet103.lector
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.fillMaxSize
@@ -10,11 +11,17 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import io.github.diet103.lector.ui.home.HomeScreen
 import io.github.diet103.lector.ui.onboarding.OnboardingScreen
+import io.github.diet103.lector.ui.settings.SettingsScreen
 import io.github.diet103.lector.ui.theme.LectorTheme
+import io.github.diet103.lector.ui.voices.VoicePickerScreen
+
+/** Where the single activity currently is. A plain enum: four destinations don't earn a nav library. */
+private enum class Screen { Home, Settings, Voices }
 
 /**
  * Onboarding until there's a usable key and voice, then Home. The notification permission is
@@ -30,27 +37,56 @@ class MainActivity : ComponentActivity() {
         setContent {
             LectorTheme {
                 var setUp by remember { mutableStateOf(container.isSetUp) }
+                var screen by rememberSaveable { mutableStateOf(Screen.Home) }
+
+                // Back out of a sub-screen rather than leaving the app.
+                BackHandler(enabled = setUp && screen != Screen.Home) {
+                    screen = if (screen == Screen.Voices) Screen.Settings else Screen.Home
+                }
 
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    if (setUp) {
-                        HomeScreen(
-                            container = container,
-                            onChangeKey = {
-                                container.apiKeyStore.clear()
-                                container.lastError.clear()
-                                setUp = false
-                            },
-                            modifier = Modifier.padding(innerPadding)
-                        )
-                    } else {
+                    val content = Modifier.padding(innerPadding)
+
+                    if (!setUp) {
                         OnboardingScreen(
                             container = container,
-                            onFinished = { setUp = true },
-                            modifier = Modifier.padding(innerPadding)
+                            onFinished = { setUp = true; screen = Screen.Home },
+                            modifier = content
+                        )
+                        return@Scaffold
+                    }
+
+                    when (screen) {
+                        Screen.Home -> HomeScreen(
+                            container = container,
+                            onChangeKey = { signOut(container); setUp = false },
+                            onOpenSettings = { screen = Screen.Settings },
+                            modifier = content
+                        )
+
+                        Screen.Settings -> SettingsScreen(
+                            container = container,
+                            onPickVoice = { screen = Screen.Voices },
+                            onSignOut = { signOut(container); setUp = false },
+                            onDone = { screen = Screen.Home },
+                            modifier = content
+                        )
+
+                        Screen.Voices -> VoicePickerScreen(
+                            container = container,
+                            onDone = { screen = Screen.Settings },
+                            modifier = content
                         )
                     }
                 }
             }
         }
+    }
+
+    /** Clears the key and every setting; the ElevenLabs account itself is untouched. */
+    private fun signOut(container: io.github.diet103.lector.app.AppContainer) {
+        container.apiKeyStore.clear()
+        container.settings.clear()
+        container.lastError.clear()
     }
 }

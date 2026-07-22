@@ -54,6 +54,7 @@ import io.github.diet103.lector.tts.ApiResult
 fun HomeScreen(
     container: AppContainer,
     onChangeKey: () -> Unit,
+    onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -167,9 +168,7 @@ fun HomeScreen(
                 onSpeak = {
                     val active = controller ?: return@MiniPlayer
                     container.lastError.clear()
-                    val uri = container.registry.register(
-                        SpeakRequest(text = text.trim(), voiceId = voiceId.orEmpty())
-                    )
+                    val uri = container.registry.register(container.speakRequest(text.trim()))
                     active.setMediaItem(MediaItem.Builder().setMediaId(uri.lastPathSegment!!).build())
                     active.prepare()
                     active.play()
@@ -177,7 +176,7 @@ fun HomeScreen(
             )
 
             Spacer(Modifier.size(16.dp))
-            TextButton(onClick = onChangeKey) { Text("Change API key") }
+            TextButton(onClick = onOpenSettings) { Text("Settings") }
         }
     }
 }

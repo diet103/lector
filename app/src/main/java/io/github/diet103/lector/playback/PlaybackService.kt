@@ -10,6 +10,11 @@ import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import io.github.diet103.lector.LectorApplication
 import io.github.diet103.lector.MainActivity
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 
 /**
  * The foreground media service (PLAN §6 P2). Owns the single [ExoPlayer] and one [MediaSession];
@@ -26,6 +31,8 @@ class PlaybackService : MediaSessionService() {
 
     private val idleHandler = Handler(Looper.getMainLooper())
     private val idleStop = Runnable { stopSelf() }
+
+    private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
     override fun onCreate() {
         super.onCreate()
@@ -58,6 +65,12 @@ class PlaybackService : MediaSessionService() {
             .setCallback(TtsSessionCallback(container.registry))
             .setSessionActivity(sessionActivity)
             .build()
+
+        // Speed is applied by the player, never by the API — so dragging the slider re-pitches
+        // what's already playing and cannot re-synthesise or re-bill (PLAN §6 P6).
+        serviceScope.launch {
+            container.settings.speed.collect { player.setPlaybackSpeed(it) }
+        }
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = mediaSession
@@ -71,6 +84,7 @@ class PlaybackService : MediaSessionService() {
     }
 
     override fun onDestroy() {
+        serviceScope.cancel()
         idleHandler.removeCallbacks(idleStop)
         mediaSession?.run {
             player.release()
