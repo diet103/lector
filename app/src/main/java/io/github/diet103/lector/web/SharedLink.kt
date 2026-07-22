@@ -36,9 +36,14 @@ object SharedLink {
     }
 
     /**
-     * True for sites that serve anonymous fetches a login wall rather than the content. Verified
-     * 2026-07-21: reddit `.json` returns 403 and `old.reddit.com` serves a "Welcome to Reddit"
-     * interstitial, so there is nothing to extract without an account.
+     * True for sites that serve anonymous fetches a login wall rather than the content.
+     *
+     * Verified 2026-07-21: reddit `.json` returns 403 and `old.reddit.com` serves a "Welcome to
+     * Reddit" interstitial, so there is nothing to extract without an account. Re-tested
+     * 2026-07-22 across three User-Agents — a descriptive `android:<pkg>:<version> (by /u/…)` one,
+     * a mobile browser one, and bare curl — plus `api.reddit.com` and `/r/all.json`: 403 every
+     * time. It is not a User-Agent problem and there is no anonymous route left. Reading Reddit
+     * needs OAuth; until then this stays, because refusing costs no characters.
      */
     fun isWalledOff(url: String): Boolean {
         val host = hostOf(url) ?: return false
