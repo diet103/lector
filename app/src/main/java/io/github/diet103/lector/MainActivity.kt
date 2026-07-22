@@ -14,6 +14,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import io.github.diet103.lector.ui.about.AboutScreen
 import io.github.diet103.lector.ui.home.HomeScreen
 import io.github.diet103.lector.ui.onboarding.OnboardingScreen
 import io.github.diet103.lector.ui.settings.SettingsScreen
@@ -21,7 +22,7 @@ import io.github.diet103.lector.ui.theme.LectorTheme
 import io.github.diet103.lector.ui.voices.VoicePickerScreen
 
 /** Where the single activity currently is. A plain enum: four destinations don't earn a nav library. */
-private enum class Screen { Home, Settings, Voices }
+private enum class Screen { Home, Settings, Voices, About }
 
 /**
  * Onboarding until there's a usable key and voice, then Home. The notification permission is
@@ -41,7 +42,10 @@ class MainActivity : ComponentActivity() {
 
                 // Back out of a sub-screen rather than leaving the app.
                 BackHandler(enabled = setUp && screen != Screen.Home) {
-                    screen = if (screen == Screen.Voices) Screen.Settings else Screen.Home
+                    screen = when (screen) {
+                        Screen.Voices, Screen.About -> Screen.Settings
+                        else -> Screen.Home
+                    }
                 }
 
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
@@ -67,6 +71,7 @@ class MainActivity : ComponentActivity() {
                         Screen.Settings -> SettingsScreen(
                             container = container,
                             onPickVoice = { screen = Screen.Voices },
+                            onOpenAbout = { screen = Screen.About },
                             onSignOut = { signOut(container); setUp = false },
                             onDone = { screen = Screen.Home },
                             modifier = content
@@ -74,6 +79,11 @@ class MainActivity : ComponentActivity() {
 
                         Screen.Voices -> VoicePickerScreen(
                             container = container,
+                            onDone = { screen = Screen.Settings },
+                            modifier = content
+                        )
+
+                        Screen.About -> AboutScreen(
                             onDone = { screen = Screen.Settings },
                             modifier = content
                         )

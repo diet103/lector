@@ -1,19 +1,146 @@
 # Lector
 
-Instantly hear any on-screen text in an ElevenLabs voice. No import step, no library.
+**Hear any text on your screen, in any ElevenLabs voice, in about a second.**
 
-Three ways in:
+Select text anywhere in Android and tap **Read aloud (Lector)**. Or share text, a link, or a
+screenshot to Lector. Playback starts almost immediately and behaves like a proper media app —
+play/pause from the notification shade, pauses for calls and unplugged headphones, keeps going with
+the screen off.
 
-1. **Select it** — highlight text in any app and tap **Read aloud** in the selection toolbar.
-2. **Share it** — share text to Lector from apps without the toolbar action.
-3. **Screenshot it** — for apps where text can't be selected (Reddit, images, memes): screenshot → Share → Lector reads what's on it via on-device OCR. The screenshot never leaves your phone; only the recognized text is sent to ElevenLabs.
+Lector uses **your own** ElevenLabs API key. Requests go straight from your phone to ElevenLabs.
+There is no middleman server, no account to create, no analytics, and no ads.
 
-Playback starts in about a second and runs as a proper media session — play/pause/stop from the notification shade, pauses when your headphones disconnect or a call comes in.
+---
 
-**Bring your own key**: Lector uses *your* ElevenLabs developer API key (the API key from elevenlabs.io — not your ElevenReader login). Your key is stored encrypted on-device and requests go straight from your phone to ElevenLabs. No middleman, no analytics, no ads.
+## Install
 
-> **Status: under construction.** See [PLAN.md](PLAN.md) for the full design and roadmap.
+Grab an APK from the [latest release](https://github.com/diet103/lector/releases/latest).
 
-## License
+| File | For |
+| --- | --- |
+| `app-arm64-v8a-release.apk` | **Almost certainly this one** — every phone sold in the last several years (~15 MB) |
+| `app-armeabi-v7a-release.apk` | Older 32-bit phones |
+| `app-x86_64-release.apk` | Emulators and ChromeOS |
+| `app-universal-release.apk` | If unsure, or if the others refuse to install (~43 MB) |
 
-[Apache-2.0](LICENSE)
+Android refuses to install an APK built for the wrong CPU, so a wrong guess fails harmlessly at
+install time. You will need to allow installing from your browser or file manager the first time.
+Verify the download against the `SHA256SUMS.txt` published with each release.
+
+Requires Android 8.0 or newer.
+
+## Setup
+
+1. Get an API key at [elevenlabs.io → Developers → API Keys](https://elevenlabs.io/app/developers/api-keys).
+   This is the **developer API key**, not your ElevenReader login.
+2. Open Lector and paste it in. Lector validates the key, shows your plan and remaining characters,
+   and picks a voice your plan can actually use.
+3. That's it. Go highlight some text.
+
+Your key is encrypted with a device-bound key from the Android Keystore, stored in its own file, and
+excluded from cloud backup and device-to-device transfer.
+
+## The four ways in
+
+| How | What it does |
+| --- | --- |
+| **Select text** → *Read aloud (Lector)* | The selection toolbar in browsers, readers, chat apps |
+| **Share → Lector** (text) | For apps whose selection toolbar doesn't offer it |
+| **Share → Lector** (link) | Fetches the page and reads the article, skipping navigation and footers |
+| **Share → Lector** (screenshot or image) | Reads the text out of the image, entirely on your phone |
+
+The screenshot path is the universal fallback: it works in any app, including ones that block text
+selection. **The image never leaves your device** — text recognition is a bundled offline library.
+
+## What it costs
+
+ElevenLabs bills per character, and Lector is careful with your money:
+
+- **Every read is cached.** Replaying something you've already heard is free, forever.
+- **Playback speed is deliberately not part of the cache key**, so dragging the speed slider never
+  re-synthesises anything.
+- **No seek bar.** Scrubbing a streamed response would re-request the audio and bill you twice, so
+  the seek controls are removed from the session rather than left there to cost you money.
+- **A length cap**, cut at a sentence boundary, so a runaway page can't drain your balance. Lector
+  always tells you when it trimmed something.
+- **Known-unreadable links cost nothing.** A Reddit link is refused before a single character is
+  spent, because Reddit blocks anonymous reads entirely.
+
+There is a test in CI whose only job is to assert that one text produces exactly **one** network
+POST, no matter how much you pause, resume, or replay it.
+
+## How it works
+
+```
+selection / share / screenshot / link
+              │
+              ▼
+      ReadAloudActivity          translucent, over the calling app; never returns a result
+              │                  (returning one would overwrite the user's selection)
+              ▼
+        AppContainer             one place builds every request, so no entry point can drift
+              │
+              ▼
+      PlaybackService            MediaSessionService — owns the only ExoPlayer and MediaSession
+              │
+              ▼
+   lector://tts/<sha256>         the player only ever sees an opaque URI
+              │
+     ResolvingDataSource         rewrites it into an authenticated POST at load time
+              │
+      CacheDataSource            write-through disk cache, keyed by the same hash
+              │
+              ▼
+         ElevenLabs
+```
+
+A few decisions worth stealing:
+
+- **The player never holds credentials.** It holds `lector://tts/<hash>`; a `ResolvingDataSource`
+  turns that into the real authenticated request only at the moment bytes are needed. That also
+  makes the media id safe to hand to any `MediaController`.
+- **The cache key is a product decision, not a technical one.** `sha256(text | voice | model |
+  format)` — speed is absent because the player applies it, so speed is free; model and format are
+  present because changing them genuinely produces different audio.
+- **ExoPlayer sets `FLAG_DONT_CACHE_IF_LENGTH_UNKNOWN` on every request.** A streamed response has
+  unknown length, so the write-through cache silently never gets written. It has to be stripped
+  explicitly, and nothing tells you.
+- **Capabilities can be removed from a `MediaSession`.** Stripping `COMMAND_SEEK_*` is what removes
+  the scrubber from the notification.
+
+More of this is written up in [docs/LESSONS.md](docs/LESSONS.md) — the Android traps this project
+paid for the hard way. The full design lives in [PLAN.md](PLAN.md).
+
+## Known limitations
+
+- **Gmail and Keep compose fields don't show the action.** Those apps build custom selection menus
+  that exclude third-party actions by criteria we couldn't identify — Lector's manifest matches the
+  same MIME types as apps that *do* appear. Use the screenshot path there.
+- **Reddit links can't be read.** Anonymous access to Reddit is gone: the JSON endpoints return 403
+  and `old.reddit.com` serves a login wall. Screenshot the post instead.
+- **Pages without paragraph markup** (Hacker News items, many forums) extract to nothing and say so,
+  rather than reading a navigation menu at you.
+- **No offline voices.** Lector is a front end for ElevenLabs; without a network it says so.
+
+## Build from source
+
+```bash
+git clone https://github.com/diet103/lector && cd lector
+./gradlew assembleDebug
+```
+
+`./gradlew lint testDebugUnitTest` is exactly what CI runs. `./gradlew assembleRelease` produces a
+minified build, unsigned unless you supply a keystore — see
+[docs/dev-setup.md](docs/dev-setup.md).
+
+## Privacy
+
+Nothing is collected. The only thing that leaves your phone is the text you asked to have read, sent
+to ElevenLabs with your own key. Screenshots are read on-device and never uploaded. Full detail in
+[PRIVACY.md](PRIVACY.md).
+
+## Licence
+
+[Apache-2.0](LICENSE). Lector bundles Google's ML Kit for on-device text recognition, which is
+covered by Google's own terms rather than an open-source licence; everything else is Apache-2.0 or
+MIT. See the About screen in the app for the full list.

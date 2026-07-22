@@ -51,6 +51,7 @@ import kotlin.math.roundToInt
 fun SettingsScreen(
     container: AppContainer,
     onPickVoice: () -> Unit,
+    onOpenAbout: () -> Unit,
     onSignOut: () -> Unit,
     onDone: () -> Unit,
     modifier: Modifier = Modifier
@@ -182,6 +183,11 @@ fun SettingsScreen(
             cacheNotice?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
 
             Spacer(Modifier.size(16.dp))
+            OutlinedButton(onClick = onOpenAbout, modifier = Modifier.fillMaxWidth()) {
+                Text("About and licences")
+            }
+
+            Spacer(Modifier.size(8.dp))
             OutlinedButton(
                 onClick = { confirmSignOut = true },
                 modifier = Modifier.fillMaxWidth()

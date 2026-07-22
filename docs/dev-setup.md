@@ -39,3 +39,53 @@ Notes:
 ./gradlew testDebugUnitTest lint # what CI runs
 adb shell am start -n io.github.diet103.lector/.MainActivity
 ```
+
+Debug builds carry **only the arm64-v8a** native libraries, which keeps the APK around 27 MB instead
+of 60 MB and makes every wireless install noticeably quicker. If you need one that also installs on
+an x86_64 emulator, build with `-PdebugAbis=all`.
+
+## Releasing
+
+### The signing keystore — read this before you lose it
+
+`lector-release.jks` and `keystore.properties` live at the repo root and are git-ignored. **They are
+not recoverable.** Android identifies an app by its signing certificate, so if these are lost every
+existing installation must be *uninstalled* before it can update — silently breaking the update path
+for everyone who sideloaded it.
+
+Back up both files somewhere durable and off this machine (password manager attachment, encrypted
+archive in cloud storage — anywhere that is not just this WSL2 filesystem). `keystore.properties`
+contains the store and key passwords in plain text, so treat it exactly like the keystore itself.
+
+To build a signed release locally:
+
+```bash
+./gradlew assembleRelease
+```
+
+Output lands in `app/build/outputs/apk/release/` as one APK per ABI plus a universal one. With no
+keystore present the build still succeeds and produces `-unsigned` APKs, which is what anyone
+cloning the repo gets.
+
+### Cutting a release
+
+CI does the real build. It needs four repository secrets (Settings → Secrets and variables →
+Actions):
+
+| Secret | Value |
+| --- | --- |
+| `KEYSTORE_BASE64` | `base64 -w0 lector-release.jks` |
+| `KEYSTORE_PASSWORD` | `storePassword` from `keystore.properties` |
+| `KEY_ALIAS` | `lector` |
+| `KEY_PASSWORD` | `keyPassword` from `keystore.properties` |
+
+Then:
+
+1. Bump `versionCode` and `versionName` in `app/build.gradle.kts`. The workflow **fails** if the tag
+   and `versionName` disagree, which is deliberate.
+2. Commit, then `git tag v0.1.0 && git push --tags`.
+3. `.github/workflows/release.yml` builds, lints, tests, signs, verifies each APK is really signed,
+   writes `SHA256SUMS.txt`, and publishes the GitHub Release.
+
+Run the workflow manually (`workflow_dispatch`) to rehearse all of that without publishing — it
+uploads the APKs as a build artifact and skips the release step.

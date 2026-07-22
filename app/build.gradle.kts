@@ -11,6 +11,23 @@ val devProps = Properties().apply {
     if (file.exists()) file.inputStream().use { load(it) }
 }
 
+// Release signing. Locally from keystore.properties (git-ignored), in CI from repo secrets exported
+// as env vars. When neither is present `assembleRelease` still succeeds and simply leaves the APK
+// unsigned, so anyone cloning the repo can build a minified APK without our keystore.
+val keystoreProps = Properties().apply {
+    val file = rootProject.file("keystore.properties")
+    if (file.exists()) file.inputStream().use { load(it) }
+}
+
+fun signingSecret(property: String, environment: String): String? =
+    keystoreProps.getProperty(property) ?: System.getenv(environment)
+
+// ML Kit's OCR model is ~10.6 MB of native code per ABI and ~41 MB across all four, so an unsplit
+// APK is an indefensible sideload download. Splits are release-only: debug stays a single
+// app-debug.apk so the install loop and CI remain one-liners. Force either way with -PabiSplits=.
+val abiSplits: Boolean = (project.findProperty("abiSplits") as String?)?.toBooleanStrictOrNull()
+    ?: gradle.startParameter.taskNames.any { it.contains("Release") }
+
 android {
     namespace = "io.github.diet103.lector"
     compileSdk = 37
@@ -20,14 +37,49 @@ android {
         minSdk = 26
         targetSdk = 36
         versionCode = 1
-        versionName = "0.0.1-dev"
+        versionName = "0.1.0"
 
         buildConfigField("String", "DEV_ELEVEN_KEY", "\"\"")
+    }
+
+    // Every split shares versionCode 1 on purpose. Distinct per-ABI codes only matter to Play's
+    // multi-APK resolution; for sideloading they would turn switching from the universal APK to a
+    // per-ABI one into a blocked "downgrade". Revisit if Lector ever ships on Play.
+    splits {
+        abi {
+            isEnable = abiSplits
+            reset()
+            // x86 (32-bit) is omitted — it is effectively dead on Android 8+.
+            include("arm64-v8a", "armeabi-v7a", "x86_64")
+            // The universal APK is the "if unsure, take this one" download.
+            isUniversalApk = true
+        }
+    }
+
+    signingConfigs {
+        create("release") {
+            val store = signingSecret("storeFile", "LECTOR_KEYSTORE_FILE")
+            if (store != null) {
+                storeFile = rootProject.file(store)
+                storePassword = signingSecret("storePassword", "LECTOR_KEYSTORE_PASSWORD")
+                keyAlias = signingSecret("keyAlias", "LECTOR_KEY_ALIAS")
+                keyPassword = signingSecret("keyPassword", "LECTOR_KEY_PASSWORD")
+            }
+            // AGP leaves v3 off by default. It is the scheme that supports key rotation, which is
+            // the only escape hatch a sideloaded app has if this key is ever compromised.
+            enableV3Signing = true
+        }
     }
 
     buildTypes {
         debug {
             buildConfigField("String", "DEV_ELEVEN_KEY", "\"${devProps.getProperty("ELEVENLABS_API_KEY", "")}\"")
+            // The dev loop installs on one arm64 phone, and carrying all four ML Kit ABIs made the
+            // debug APK 60 MB — slow to dex and slow to push over wireless adb. Pass -PdebugAbis=all
+            // when you need an APK that also installs on an x86_64 emulator.
+            if (project.findProperty("debugAbis") != "all") {
+                ndk { abiFilters += "arm64-v8a" }
+            }
         }
         release {
             isMinifyEnabled = true
@@ -36,6 +88,7 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            signingConfig = signingConfigs.getByName("release").takeIf { it.storeFile != null }
         }
     }
 

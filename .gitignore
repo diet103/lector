@@ -7,9 +7,11 @@ app/build/
 local.properties
 dev.properties
 
-# Signing — never commit
+# Signing — never commit. keystore.properties holds the store/key passwords in plain text, so it is
+# every bit as sensitive as the keystore itself.
 *.keystore
 *.jks
+keystore.properties
 
 # IDE
 .idea/
